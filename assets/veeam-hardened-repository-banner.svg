@@ -1,77 +1,93 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
   <title id="title">Veeam Hardened Repository Bootstrap</title>
-  <desc id="desc">Banner for the Veeam Hardened Repository Bootstrap project.</desc>
+  <desc id="desc">Cleaner banner for the Veeam Hardened Repository Bootstrap project.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#10212b"/>
-      <stop offset="55%" stop-color="#183a47"/>
-      <stop offset="100%" stop-color="#264653"/>
+      <stop offset="52%" stop-color="#173846"/>
+      <stop offset="100%" stop-color="#204b58"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#f4a261"/>
       <stop offset="100%" stop-color="#e76f51"/>
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#08131a" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#08131a" flood-opacity="0.28"/>
     </filter>
   </defs>
 
   <rect width="1280" height="640" fill="url(#bg)"/>
-  <circle cx="1090" cy="110" r="170" fill="#2a9d8f" opacity="0.16"/>
-  <circle cx="1040" cy="500" r="210" fill="#f4a261" opacity="0.08"/>
-  <circle cx="140" cy="110" r="120" fill="#e9c46a" opacity="0.08"/>
+  <circle cx="1090" cy="126" r="168" fill="#2a9d8f" opacity="0.10"/>
+  <circle cx="1040" cy="516" r="194" fill="#f4a261" opacity="0.06"/>
+  <circle cx="116" cy="108" r="108" fill="#e9c46a" opacity="0.06"/>
 
-  <g transform="translate(72 80)">
-    <rect x="0" y="0" width="490" height="58" rx="29" fill="#ffffff" opacity="0.08"/>
-    <text x="28" y="37" fill="#f1faee" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+  <g transform="translate(76 82)">
+    <rect x="0" y="0" width="430" height="56" rx="28" fill="#ffffff" opacity="0.08"/>
+    <text x="24" y="36" fill="#f5fbfd" font-size="27" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
       Veeam Hardened Repository Bootstrap
     </text>
 
-    <text x="0" y="136" fill="#ffffff" font-size="66" font-family="Segoe UI, Arial, sans-serif" font-weight="800">
-      Safer first attach.
+    <text x="0" y="134" fill="#ffffff" font-size="58" font-family="Segoe UI, Arial, sans-serif" font-weight="820">
+      Safer first attach
     </text>
-    <text x="0" y="212" fill="#ffffff" font-size="66" font-family="Segoe UI, Arial, sans-serif" font-weight="800">
-      Smarter Linux hardening.
+    <text x="0" y="202" fill="#ffffff" font-size="58" font-family="Segoe UI, Arial, sans-serif" font-weight="820">
+      for Ubuntu repositories
     </text>
 
-    <rect x="0" y="258" width="500" height="6" rx="3" fill="url(#accent)"/>
+    <rect x="0" y="240" width="440" height="6" rx="3" fill="url(#accent)"/>
 
-    <text x="0" y="330" fill="#dbe7ec" font-size="30" font-family="Segoe UI, Arial, sans-serif">
-      Ubuntu 22.04 / 24.04
+    <text x="0" y="304" fill="#dbe7ec" font-size="28" font-family="Segoe UI, Arial, sans-serif">
+      Bash automation for Veeam onboarding, hardening, and controlled lockdown
     </text>
-    <text x="0" y="372" fill="#dbe7ec" font-size="30" font-family="Segoe UI, Arial, sans-serif">
-      LVM + XFS + SSH/UFW + post-attach lockdown
-    </text>
-    <text x="0" y="414" fill="#dbe7ec" font-size="30" font-family="Segoe UI, Arial, sans-serif">
-      Built for Veeam onboarding safety and operator clarity
+
+    <g transform="translate(0 360)">
+      <rect x="0" y="0" width="206" height="52" rx="26" fill="#ffffff" opacity="0.10"/>
+      <text x="24" y="33" fill="#f5fbfd" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+        Ubuntu 22.04 / 24.04
+      </text>
+
+      <rect x="224" y="0" width="138" height="52" rx="26" fill="#ffffff" opacity="0.10"/>
+      <text x="256" y="33" fill="#f5fbfd" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+        LVM + XFS
+      </text>
+
+      <rect x="380" y="0" width="138" height="52" rx="26" fill="#ffffff" opacity="0.10"/>
+      <text x="410" y="33" fill="#f5fbfd" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+        SSH + UFW
+      </text>
+    </g>
+
+    <text x="0" y="468" fill="#f1c27d" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+      Prepare first. Lock down after a successful Veeam attach.
     </text>
   </g>
 
-  <g transform="translate(742 112)" filter="url(#shadow)">
-    <rect x="0" y="0" width="440" height="376" rx="28" fill="#f7fbfc"/>
-    <rect x="0" y="0" width="440" height="76" rx="28" fill="#1f6f78"/>
-    <circle cx="36" cy="38" r="8" fill="#f4a261"/>
-    <circle cx="62" cy="38" r="8" fill="#e76f51"/>
-    <circle cx="88" cy="38" r="8" fill="#2a9d8f"/>
+  <g transform="translate(846 118)" filter="url(#shadow)">
+    <rect x="0" y="0" width="356" height="354" rx="28" fill="#f7fbfc"/>
+    <rect x="0" y="0" width="356" height="72" rx="28" fill="#1f6f78"/>
+    <rect x="0" y="40" width="356" height="32" fill="#1f6f78"/>
+    <circle cx="30" cy="36" r="7" fill="#f4a261"/>
+    <circle cx="54" cy="36" r="7" fill="#e76f51"/>
+    <circle cx="78" cy="36" r="7" fill="#2a9d8f"/>
 
-    <g transform="translate(34 116)">
-      <rect x="0" y="0" width="372" height="68" rx="20" fill="#edf6f4"/>
-      <text x="22" y="43" fill="#10323d" font-size="30" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+    <g transform="translate(28 102)">
+      <rect x="0" y="0" width="300" height="74" rx="20" fill="#edf6f4"/>
+      <text x="20" y="44" fill="#10323d" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="800">
         Phase 1  Prepare
       </text>
-      <text x="22" y="112" fill="#35545d" font-size="24" font-family="Segoe UI, Arial, sans-serif">
+      <text x="20" y="105" fill="#4b6670" font-size="21" font-family="Segoe UI, Arial, sans-serif">
         Disk checks, LVM, XFS, SSH, UFW
       </text>
 
-      <path d="M184 132 L184 172" stroke="#2a9d8f" stroke-width="6" stroke-linecap="round"/>
-      <path d="M166 158 L184 180 L202 158" fill="none" stroke="#2a9d8f" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M150 124 L150 166" stroke="#2a9d8f" stroke-width="6" stroke-linecap="round"/>
+      <path d="M132 152 L150 174 L168 152" fill="none" stroke="#2a9d8f" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
 
-      <rect x="0" y="198" width="372" height="96" rx="20" fill="#fff3e8"/>
-      <text x="22" y="241" fill="#10323d" font-size="30" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
+      <rect x="0" y="194" width="300" height="94" rx="20" fill="#fff3e8"/>
+      <text x="20" y="238" fill="#10323d" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="800">
         Phase 2  Lockdown
       </text>
-      <text x="22" y="280" fill="#35545d" font-size="24" font-family="Segoe UI, Arial, sans-serif">
-        Reduce sudo only after successful attach
+      <text x="20" y="275" fill="#4b6670" font-size="21" font-family="Segoe UI, Arial, sans-serif">
+        Reduce sudo after successful attach
       </text>
     </g>
   </g>
