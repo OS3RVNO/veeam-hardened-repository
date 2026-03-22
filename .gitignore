@@ -1,0 +1,8 @@
+*.zip
+*.log
+*.tmp
+*.bak_*
+.DS_Store
+Thumbs.db
+.pytest_cache/
+
