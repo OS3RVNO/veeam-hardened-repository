@@ -160,9 +160,9 @@ For operational use:
 
 ## Project Status
 
-The project is ready to be published on GitHub as a standalone repository.
+The project is ready for operational use and further iteration.
 
-The only remaining explicit publication decision is the license.
+If you plan to distribute or reuse it widely, add an explicit `LICENSE` file.
 
 ## GitHub Publishing
 

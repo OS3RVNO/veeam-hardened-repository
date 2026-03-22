@@ -233,13 +233,13 @@ If you are not sure, do not use it.
 ### 1. Help
 
 ```bash
-bash /root/veeam_hardened_repository_safe.sh --help
+bash ./veeam_hardened_repository_safe.sh --help
 ```
 
 ### 2. Dry-run
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh \
+sudo bash ./veeam_hardened_repository_safe.sh \
   --dry-run \
   --non-interactive \
   --phase prepare \
@@ -255,7 +255,7 @@ sudo bash /root/veeam_hardened_repository_safe.sh \
 ### Example with Multiple Allowed Networks
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh \
+sudo bash ./veeam_hardened_repository_safe.sh \
   --dry-run \
   --non-interactive \
   --phase prepare \
@@ -271,7 +271,7 @@ sudo bash /root/veeam_hardened_repository_safe.sh \
 ### 3. Precheck
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh \
+sudo bash ./veeam_hardened_repository_safe.sh \
   --precheck-only \
   --non-interactive \
   --phase prepare \
@@ -287,7 +287,7 @@ sudo bash /root/veeam_hardened_repository_safe.sh \
 ### 4. Prepare
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh \
+sudo bash ./veeam_hardened_repository_safe.sh \
   --non-interactive \
   --phase prepare \
   --disk /dev/sdb \
@@ -302,7 +302,7 @@ sudo bash /root/veeam_hardened_repository_safe.sh \
 ### 5. Prepare with Disk Wipe
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh \
+sudo bash ./veeam_hardened_repository_safe.sh \
   --non-interactive \
   --phase prepare \
   --disk /dev/sdb \
@@ -401,7 +401,7 @@ Run `post-attach-lockdown` only if:
 ## Final Phase: Lockdown
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh \
+sudo bash ./veeam_hardened_repository_safe.sh \
   --phase post-attach-lockdown \
   --veeam-user veeamrepo \
   --veeam-group veeamrepo
@@ -516,7 +516,7 @@ ps -ef | grep -i veeam
 
 ## Common Errors
 
-### `Device non valido`
+### `Invalid block device`
 
 Check:
 
@@ -524,7 +524,7 @@ Check:
 lsblk
 ```
 
-### `Il disco selezionato sembra essere il disco di sistema`
+### `The selected disk appears to be the system disk`
 
 Check:
 
@@ -533,7 +533,7 @@ findmnt /
 lsblk -f
 ```
 
-### `Sono presenti firme o partizioni sul disco target`
+### `Disk signatures are present on the target disk`
 
 Check:
 
@@ -548,7 +548,7 @@ If you want to start from scratch and the disk is correct:
 --force-wipe yes
 ```
 
-### `L'utente veeamrepo esiste ma sembra avere password bloccata o assente`
+### `The user veeamrepo exists but appears to have a locked or missing password`
 
 Check:
 
@@ -562,7 +562,7 @@ If needed:
 --reset-existing-veeam-password yes
 ```
 
-### `La directory /opt/veeam/transport/certs non esiste ancora`
+### `Directory /opt/veeam/transport/certs was not found`
 
 This usually means Veeam onboarding has not completed yet.
 
@@ -578,7 +578,7 @@ systemctl list-units | grep -i veeam
 If you want to be guided by the script:
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh
+sudo bash ./veeam_hardened_repository_safe.sh
 ```
 
 If there is only one candidate disk, the script may suggest it automatically.
@@ -648,18 +648,18 @@ wipefs -n /dev/sdb
 Validation:
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh --dry-run ...
-sudo bash /root/veeam_hardened_repository_safe.sh --precheck-only ...
+sudo bash ./veeam_hardened_repository_safe.sh --dry-run ...
+sudo bash ./veeam_hardened_repository_safe.sh --precheck-only ...
 ```
 
 Execution:
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh --phase prepare ...
+sudo bash ./veeam_hardened_repository_safe.sh --phase prepare ...
 ```
 
 After Veeam onboarding:
 
 ```bash
-sudo bash /root/veeam_hardened_repository_safe.sh --phase post-attach-lockdown --veeam-user veeamrepo --veeam-group veeamrepo
+sudo bash ./veeam_hardened_repository_safe.sh --phase post-attach-lockdown --veeam-user veeamrepo --veeam-group veeamrepo
 ```
