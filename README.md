@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/veeam-hardened-repository-banner.svg" alt="Veeam Hardened Repository Bootstrap banner" width="100%">
+  <img src="./assets/veeam-hardened-repository-banner.png" alt="Veeam Hardened Repository Bootstrap banner" width="100%">
 </p>
 
 # Veeam Hardened Repository Bootstrap for Ubuntu 22.04 and 24.04
@@ -21,7 +21,7 @@ This repository provides a Bash script to prepare an Ubuntu `22.04 LTS` or `24.0
 It is aimed at system administrators who need to deploy a Linux hardened repository without turning the first Veeam connection into a troubleshooting exercise. The script focuses on practical automation for `veeamrepo`, LVM, XFS, SSH hardening, UFW, logging, and controlled privilege reduction after the initial attach.
 
 <p align="center">
-  <img src="./assets/veeam-workflow.svg" alt="Prepare then post-attach-lockdown workflow" width="92%">
+  <img src="./assets/veeam-workflow.png" alt="Prepare then post-attach-lockdown workflow" width="92%">
 </p>
 
 The workflow is intentionally split into two phases:
