@@ -1,12 +1,34 @@
-# Veeam Hardened Repository Safe Bootstrap
+# Veeam Hardened Repository Bootstrap for Ubuntu 22.04 and 24.04
 
-A Bash script that prepares an Ubuntu `22.04 LTS` or `24.04 LTS` server as a `Veeam Hardened Repository`, using a safer two-phase workflow:
+![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-E95420?logo=ubuntu&logoColor=white)
+![Shell](https://img.shields.io/badge/Shell-Bash-121011?logo=gnubash&logoColor=white)
+![Workflow](https://img.shields.io/badge/Workflow-Prepare%20%E2%86%92%20Post--Attach%20Lockdown-0A66C2)
+
+This repository provides a Bash script to prepare an Ubuntu `22.04 LTS` or `24.04 LTS` server as a `Veeam Hardened Repository` with a safer, operator-friendly workflow.
+
+It is designed for system administrators who want to automate Linux repository preparation for Veeam Backup & Replication while avoiding the most common onboarding mistakes: early privilege removal, overly aggressive disk assumptions, and opaque hardening steps.
+
+The workflow is intentionally split into two phases:
 
 1. `prepare`
-Sets up the server for the first Veeam connection.
+Prepares storage, networking, SSH, and the `veeamrepo` account for the first Veeam connection.
 
 2. `post-attach-lockdown`
-Reduces the privileges of the `veeamrepo` user only after the first successful onboarding.
+Reduces privileges only after the first successful Veeam onboarding.
+
+## Table of Contents
+
+- [Why This Repository Exists](#why-this-repository-exists)
+- [What This Project Does](#what-this-project-does)
+- [Key Benefits](#key-benefits)
+- [Supported Systems](#supported-systems)
+- [Repository Structure](#repository-structure)
+- [Quick Start](#quick-start)
+- [Multiple Networks](#multiple-networks)
+- [Before Using `--force-wipe yes`](#before-using---force-wipe-yes)
+- [Documentation](#documentation)
+- [Project Status](#project-status)
+- [Important Notes](#important-notes)
 
 ## Why This Script Exists
 
@@ -25,7 +47,7 @@ This project aims for the opposite:
 - practical operational documentation
 - a GitHub repository that is understandable even for users with limited Linux experience
 
-## What It Does
+## What This Project Does
 
 The script:
 
@@ -35,6 +57,15 @@ The script:
 - keeps temporary `sudo` access during the first Veeam onboarding
 - configures SSH, UFW, logging, audit, and baseline hardening
 - applies the final user lock-down only after the first attach
+
+## Key Benefits
+
+- safer first onboarding for `veeamrepo`
+- no `.env` file requirement
+- interactive mode for operators with limited Linux familiarity
+- non-interactive mode for repeatable deployments
+- `dry-run` and `precheck-only` support before making changes
+- repository-focused documentation with practical debug commands
 
 ## What It Does Not Do
 
@@ -56,6 +87,8 @@ The script does not:
 - [CHANGELOG.md](./CHANGELOG.md)
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [PUBLISHING_CHECKLIST.md](./PUBLISHING_CHECKLIST.md)
+- [SUPPORT.md](./SUPPORT.md)
+- [SECURITY.md](./SECURITY.md)
 
 ## Quick Start
 
@@ -157,6 +190,8 @@ If you are not fully sure about the disk, stop.
 For operational use:
 
 - [docs/OPERATIONAL_GUIDE.md](./docs/OPERATIONAL_GUIDE.md)
+- [SUPPORT.md](./SUPPORT.md)
+- [SECURITY.md](./SECURITY.md)
 
 ## Project Status
 
