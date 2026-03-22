@@ -1,12 +1,9 @@
 # Changelog
 
-## 0.1.0
+## 1.0.0
 
-Initial GitHub-ready project release.
-
-Includes:
-
-- the `veeam_hardened_repository_safe.sh` script
-- the two-phase `prepare` and `post-attach-lockdown` workflow
-- practical operational documentation
-- dry-run, precheck, and guided parameter selection support
+- initial public release of the Veeam Hardened Repository bootstrap script
+- English script interface and documentation
+- safer two-phase workflow for first attach and post-attach lockdown
+- improved GitHub presentation with support, security, FAQ, and issue templates
+- visual assets for repository presentation

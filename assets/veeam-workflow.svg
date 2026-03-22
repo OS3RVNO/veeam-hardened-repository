@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="280" viewBox="0 0 1200 280" role="img" aria-labelledby="title desc">
+  <title id="title">Workflow overview</title>
+  <desc id="desc">Prepare then post-attach-lockdown workflow diagram.</desc>
+  <defs>
+    <linearGradient id="panelA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#edf6f4"/>
+      <stop offset="100%" stop-color="#d8efe9"/>
+    </linearGradient>
+    <linearGradient id="panelB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff3e8"/>
+      <stop offset="100%" stop-color="#fde4cf"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="280" rx="28" fill="#f6fbfc"/>
+  <rect x="36" y="40" width="448" height="200" rx="24" fill="url(#panelA)"/>
+  <rect x="716" y="40" width="448" height="200" rx="24" fill="url(#panelB)"/>
+
+  <text x="74" y="92" fill="#17414a" font-size="34" font-family="Segoe UI, Arial, sans-serif" font-weight="800">Phase 1  Prepare</text>
+  <text x="74" y="134" fill="#35545d" font-size="23" font-family="Segoe UI, Arial, sans-serif">Use for the first Veeam connection.</text>
+  <text x="74" y="174" fill="#35545d" font-size="23" font-family="Segoe UI, Arial, sans-serif">Storage, mount, veeamrepo, SSH, UFW, audit.</text>
+  <text x="74" y="208" fill="#35545d" font-size="23" font-family="Segoe UI, Arial, sans-serif">Keeps onboarding practical and less fragile.</text>
+
+  <text x="754" y="92" fill="#6b3b16" font-size="34" font-family="Segoe UI, Arial, sans-serif" font-weight="800">Phase 2  Post-Attach Lockdown</text>
+  <text x="754" y="134" fill="#694f3f" font-size="23" font-family="Segoe UI, Arial, sans-serif">Run only after successful Veeam attach.</text>
+  <text x="754" y="174" fill="#694f3f" font-size="23" font-family="Segoe UI, Arial, sans-serif">Reduce sudo, align Veeam cert permissions,</text>
+  <text x="754" y="208" fill="#694f3f" font-size="23" font-family="Segoe UI, Arial, sans-serif">optionally tighten SSH further.</text>
+
+  <path d="M526 140 H676" fill="none" stroke="#1f6f78" stroke-width="8" stroke-linecap="round"/>
+  <path d="M648 118 L684 140 L648 162" fill="none" stroke="#1f6f78" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

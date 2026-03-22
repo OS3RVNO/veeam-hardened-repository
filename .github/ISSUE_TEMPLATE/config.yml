@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Operational Guide
+    url: https://github.com/OS3RVNO/veeam-hardened-repository/blob/main/docs/OPERATIONAL_GUIDE.md
+    about: Start here for standard usage and validation commands.
+  - name: Support Notes
+    url: https://github.com/OS3RVNO/veeam-hardened-repository/blob/main/SUPPORT.md
+    about: Gather the recommended diagnostics before opening an issue.
