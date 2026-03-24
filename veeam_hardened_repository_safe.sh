@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 umask 077
 
-SCRIPT_VERSION="2026.03.21"
+SCRIPT_VERSION="2026.03.23"
+FORCED_TIMEZONE="Europe/Rome"
+export TZ="$FORCED_TIMEZONE"
 
 # --------------------[ Defaults ]--------------------
 DEFAULT_PHASE="prepare"
@@ -69,7 +71,7 @@ DISABLE_SSHD_AFTER_ATTACH="$DEFAULT_DISABLE_SSHD_AFTER_ATTACH"
 RESET_EXISTING_VEEAM_PASSWORD="$DEFAULT_RESET_EXISTING_VEEAM_PASSWORD"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-REAL_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
 LOG_BASE_DIR="/var/log/veeam-hardened-repo"
 LOG_DIR="${LOG_BASE_DIR}/run_${TIMESTAMP}"
 MAIN_LOG="${LOG_DIR}/main.log"
@@ -80,7 +82,8 @@ OS_ID=""
 OS_VERSION_ID=""
 OS_PRETTY_NAME=""
 VEEAM_PASSWORD=""
-VEEAM_USER_WAS_CREATED="no"
+PROMPT_RESULT=""
+TUI_TITLE="veeam-hardened"
 
 # --------------------[ Colors ]--------------------
 if [[ -t 1 ]]; then
@@ -92,7 +95,6 @@ if [[ -t 1 ]]; then
     C_YELLOW="\033[33m"
     C_BLUE="\033[34m"
     C_CYAN="\033[36m"
-    C_WHITE="\033[37m"
 else
     C_RESET=""
     C_BOLD=""
@@ -102,13 +104,48 @@ else
     C_YELLOW=""
     C_BLUE=""
     C_CYAN=""
-    C_WHITE=""
 fi
 
 # --------------------[ UI ]--------------------
 ui() { printf "%b\n" "$*" >&2; }
 ui_inline() { printf "%b" "$*" >&2; }
 line() { printf "%b\n" "${C_DIM}-----------------------------------------------------------------${C_RESET}" >&2; }
+tui_available() {
+    [[ "$INTERACTIVE" == "yes" ]] || return 1
+    [[ -t 0 && -t 1 ]] || return 1
+    [[ "${TERM:-dumb}" != "dumb" ]] || return 1
+    cmd_exists whiptail
+}
+
+tui_msgbox() {
+    local text="$1"
+    whiptail --title "$TUI_TITLE" --scrolltext --msgbox "$text" 20 86
+}
+
+tui_inputbox() {
+    local prompt="$1"
+    local current="$2"
+    local answer
+
+    answer="$(whiptail --title "$TUI_TITLE" --inputbox "$prompt" 14 86 "$current" 3>&1 1>&2 2>&3)" || die "Operation cancelled by the user."
+    answer="$(normalize_ws "$answer")"
+    [[ -n "$answer" ]] || die "The value cannot be empty."
+    PROMPT_RESULT="$answer"
+}
+
+tui_yes_no() {
+    local prompt="$1"
+    local default="$2"
+    local -a cmd=(whiptail --title "$TUI_TITLE" --yesno "$prompt" 12 86)
+
+    [[ "$default" == "no" ]] && cmd=(whiptail --title "$TUI_TITLE" --defaultno --yesno "$prompt" 12 86)
+
+    if "${cmd[@]}"; then
+        PROMPT_RESULT="yes"
+    else
+        PROMPT_RESULT="no"
+    fi
+}
 
 banner() {
     clear 2>/dev/null || true
@@ -121,7 +158,8 @@ banner() {
     \_/ \___|\___|\__,_|_| |_| |_|         |_| |_|\___|_| |_|\___|
 
 EOF
-    ui "${C_RESET}${C_BOLD}Hardened Repository Safer Bootstrap${C_RESET}"
+    ui "${C_RESET}${C_BOLD}veeam-hardened${C_RESET}"
+    ui "${C_BOLD}Hardened Repository Safer Bootstrap${C_RESET}"
     ui "${C_DIM}Version: ${SCRIPT_VERSION} | Phase: ${PHASE} | Log: ${LOG_DIR}${C_RESET}"
     line
 }
@@ -140,7 +178,11 @@ err()  { ui "${C_RED}[ERR]${C_RESET} $1"; }
 
 pause_enter() {
     [[ "$INTERACTIVE" == "yes" ]] || return 0
-    read -r -p "$(printf '%b' "${C_DIM}Press ENTER to continue...${C_RESET}")"
+    if tui_available; then
+        tui_msgbox "Press ENTER or OK to continue."
+        return 0
+    fi
+    read -r -p "$(printf '%b' "${C_DIM}Press ENTER to continue...${C_RESET}")" || die "Input stream closed while waiting for confirmation."
 }
 
 # --------------------[ Logging ]--------------------
@@ -189,6 +231,7 @@ run_or_die() {
 }
 
 die() {
+    trap - ERR
     err "$*"
     log "FATAL: $*"
     exit 1
@@ -280,18 +323,142 @@ validate_extra_ufw_rules() {
 
 validate_block_device() { [[ -b "$1" ]]; }
 
+canonicalize_block_device() {
+    local device="$1"
+    readlink -f "$device" 2>/dev/null || printf '%s\n' "$device"
+}
+
+escape_path_regex() {
+    printf '%s' "$1" | sed -e 's/\./\\./g'
+}
+
+validate_whole_disk_device() {
+    [[ "$(lsblk -dn -o TYPE "$1" 2>/dev/null || true)" == "disk" ]]
+}
+
+validate_repository_disk_device() {
+    validate_whole_disk_device "$1" || return 1
+    case "$1" in
+        /dev/ram*|/dev/zram*)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+path_has_symlink_component() {
+    local path="$1"
+    local current="" part
+
+    [[ "$path" == /* ]] || return 1
+
+    IFS='/' read -r -a path_parts <<< "$path"
+    current="/"
+    for part in "${path_parts[@]}"; do
+        [[ -n "$part" ]] || continue
+        if [[ "$current" == "/" ]]; then
+            current="/${part}"
+        else
+            current="${current}/${part}"
+        fi
+        [[ -L "$current" ]] && return 0
+    done
+
+    return 1
+}
+
 path_is_under_mountpoint() {
     local path="$1"
     local base="$2"
     [[ "$path" == "$base" || "$path" == "$base/"* ]]
 }
 
+normalize_dir_path() {
+    local path="$1"
+    [[ "$path" == "/" ]] || path="${path%/}"
+    printf '%s\n' "$path"
+}
+
 path_mount_target() {
-    findmnt -n -o TARGET --target "$1" 2>/dev/null || true
+    local path="$1"
+    path="$(normalize_dir_path "$path")"
+    findmnt -n -o TARGET --target "$path" 2>/dev/null | awk 'NF {print; exit}' || true
 }
 
 mountpoint_in_use() {
-    findmnt -n --target "$1" >/dev/null 2>&1
+    local path="$1"
+    local target
+    path="$(normalize_dir_path "$path")"
+    target="$(findmnt -n -o TARGET --target "$path" 2>/dev/null | awk 'NF {print; exit}' || true)"
+    [[ "$target" == "$path" ]]
+}
+
+mountpoint_source() {
+    local path="$1"
+    local target
+
+    path="$(normalize_dir_path "$path")"
+    target="$(findmnt -n -o TARGET --target "$path" 2>/dev/null | awk 'NF {print; exit}' || true)"
+    [[ "$target" == "$path" ]] || return 1
+    findmnt -n -o SOURCE --target "$path" 2>/dev/null | awk 'NF {print; exit}' || true
+}
+
+repo_lv_mounted_at_target() {
+    local target="$1"
+    local lv_path expected_source mounted_source
+
+    lv_path="$(find_target_repo_lv_path || true)"
+    [[ -n "$lv_path" ]] || return 1
+
+    expected_source="$(canonicalize_block_device "$lv_path")"
+    mounted_source="$(mountpoint_source "$target" 2>/dev/null || true)"
+    [[ -n "$mounted_source" ]] || return 1
+    mounted_source="$(canonicalize_block_device "$mounted_source")"
+    [[ "$mounted_source" == "$expected_source" ]]
+}
+
+fstab_source_matches_lv() {
+    local source="$1"
+    local uuid="$2"
+    local lv_path="$3"
+    local canonical_source canonical_lv
+
+    [[ "$source" == "UUID=${uuid}" ]] && return 0
+    [[ "$source" == "$lv_path" ]] && return 0
+
+    canonical_lv="$(canonicalize_block_device "$lv_path")"
+    canonical_source="$(canonicalize_block_device "$source")"
+    [[ "$canonical_source" == "$canonical_lv" ]]
+}
+
+find_existing_repo_mount_target() {
+    local lv_path="$1"
+    local uuid source target
+
+    uuid="$(blkid -s UUID -o value "$lv_path" 2>/dev/null || true)"
+    [[ -n "$uuid" ]] || return 1
+
+    if repo_lv_mounted_at_target "$REPO_DIR"; then
+        printf '%s\n' "$REPO_DIR"
+        return 0
+    fi
+
+    if repo_lv_mounted_at_target "$MOUNT_POINT"; then
+        printf '%s\n' "$MOUNT_POINT"
+        return 0
+    fi
+
+    while read -r source target; do
+        [[ -n "$source" && -n "$target" ]] || continue
+        target="$(normalize_dir_path "$target")"
+        [[ "$target" == "$REPO_DIR" || "$target" == "$MOUNT_POINT" ]] || continue
+        if fstab_source_matches_lv "$source" "$uuid" "$lv_path"; then
+            printf '%s\n' "$target"
+            return 0
+        fi
+    done < <(awk '$1 !~ /^#/ && NF >= 2 {print $1, $2}' /etc/fstab 2>/dev/null || true)
+
+    return 1
 }
 
 dir_nonempty() {
@@ -328,6 +495,24 @@ write_file() {
     rm -f "$tmp"
 }
 
+replace_fstab_target_entry() {
+    local target_path="$1"
+    local uuid="$2"
+    local tmp
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN rewrite fstab entry for ${target_path}: UUID=${uuid} ${target_path} xfs ${FSTAB_OPTS} 0 0"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    awk -v target="$target_path" '$2 != target {print $0}' /etc/fstab > "$tmp"
+    printf 'UUID=%s %s xfs %s 0 0\n' "$uuid" "$target_path" "$FSTAB_OPTS" >> "$tmp"
+    backup_file /etc/fstab
+    install -o root -g root -m 0644 "$tmp" /etc/fstab
+    rm -f "$tmp"
+}
+
 set_kv_in_file() {
     local key="$1"
     local value="$2"
@@ -352,6 +537,140 @@ set_kv_in_file() {
     rm -f "$tmp"
 }
 
+set_spaced_kv_in_file() {
+    local key="$1"
+    local value="$2"
+    local file="$3"
+    local tmp
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN set ${key} ${value} in ${file}"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    touch "$file"
+    awk -v key="$key" -v value="$value" '
+        BEGIN { done = 0 }
+        {
+            trimmed = $0
+            sub(/^[[:space:]]+/, "", trimmed)
+            if (trimmed ~ "^#?[[:space:]]*" key "([[:space:]]|$)") {
+                if (!done) {
+                    printf "%s\t%s\n", key, value
+                    done = 1
+                }
+                next
+            }
+            print
+        }
+        END {
+            if (!done) {
+                printf "%s\t%s\n", key, value
+            }
+        }
+    ' "$file" > "$tmp"
+    backup_file "$file"
+    install -o root -g root -m 0644 "$tmp" "$file"
+    rm -f "$tmp"
+}
+
+set_pam_module_line() {
+    local file="$1"
+    local module_pattern="$2"
+    local replacement="$3"
+    local anchor_pattern="$4"
+    local tmp
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN update PAM line in ${file}: ${replacement}"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    touch "$file"
+    awk -v module_pattern="$module_pattern" -v replacement="$replacement" -v anchor_pattern="$anchor_pattern" '
+        BEGIN { done = 0 }
+        {
+            if ($0 ~ module_pattern) {
+                if (!done) {
+                    print replacement
+                    done = 1
+                }
+                next
+            }
+            if (!done && $0 ~ anchor_pattern) {
+                print replacement
+                done = 1
+            }
+            print
+        }
+        END {
+            if (!done) {
+                print replacement
+            }
+        }
+    ' "$file" > "$tmp"
+    backup_file "$file"
+    install -o root -g root -m 0644 "$tmp" "$file"
+    rm -f "$tmp"
+}
+
+set_line_matching_regex() {
+    local regex="$1"
+    local replacement="$2"
+    local file="$3"
+    local tmp
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN update line in ${file}: ${replacement}"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    touch "$file"
+    awk -v regex="$regex" -v replacement="$replacement" '
+        BEGIN { done = 0 }
+        {
+            if ($0 ~ regex) {
+                if (!done) {
+                    print replacement
+                    done = 1
+                }
+                next
+            }
+            print
+        }
+        END {
+            if (!done) {
+                print replacement
+            }
+        }
+    ' "$file" > "$tmp"
+    backup_file "$file"
+    install -o root -g root -m 0644 "$tmp" "$file"
+    rm -f "$tmp"
+}
+
+remove_lines_matching_regex() {
+    local regex="$1"
+    local file="$2"
+    local tmp
+
+    [[ -e "$file" ]] || return 0
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN remove lines from ${file} matching ${regex}"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    awk -v regex="$regex" '$0 !~ regex { print }' "$file" > "$tmp"
+    backup_file "$file"
+    install -o root -g root -m 0644 "$tmp" "$file"
+    rm -f "$tmp"
+}
+
 append_line_if_missing() {
     local file="$1"
     local line_text="$2"
@@ -370,7 +689,23 @@ append_line_if_missing() {
 }
 
 generate_random_password() {
-    tr -dc 'A-Za-z0-9!@#%_=+.-' < /dev/urandom | head -c 24
+    local password=""
+    local needed chunk
+
+    while (( ${#password} < 24 )); do
+        needed=$((24 - ${#password}))
+        chunk="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#%_=+.-' < /dev/urandom | head -c "$needed" || true)"
+        [[ -n "$chunk" ]] || die "Unable to generate a random password."
+        password+="$chunk"
+    done
+
+    printf '%s' "$password"
+}
+
+veeam_agent_for_linux_installed() {
+    dpkg-query -W -f='${Status}\n' veeam 2>/dev/null | grep -Fxq 'install ok installed' && return 0
+    cmd_exists systemctl && systemctl list-unit-files veeamservice.service 2>/dev/null | grep -Fq 'veeamservice.service' && return 0
+    return 1
 }
 
 ensure_safe_workdir() {
@@ -392,35 +727,68 @@ load_os_release() {
     fi
 }
 
+ensure_timezone_europe_rome() {
+    local zoneinfo="/usr/share/zoneinfo/${FORCED_TIMEZONE}"
+    local current_timezone=""
+
+    [[ -e "$zoneinfo" ]] || die "Timezone data not found for ${FORCED_TIMEZONE}."
+
+    if cmd_exists timedatectl; then
+        current_timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+        if [[ "$current_timezone" == "$FORCED_TIMEZONE" ]]; then
+            return 0
+        fi
+
+        if timedatectl set-timezone "$FORCED_TIMEZONE" >/dev/null 2>&1; then
+            return 0
+        fi
+
+        warn "timedatectl could not set timezone to ${FORCED_TIMEZONE}. Falling back to /etc/localtime."
+    fi
+
+    ln -snf "$zoneinfo" /etc/localtime
+    printf '%s\n' "$FORCED_TIMEZONE" > /etc/timezone
+}
+
 ubuntu_supported() {
     [[ "$OS_ID" == "ubuntu" && ( "$OS_VERSION_ID" == "22.04" || "$OS_VERSION_ID" == "24.04" ) ]]
 }
 
 detect_partition_name() {
-    if [[ "$BACKUP_DISK" =~ nvme[0-9]+n[0-9]+$ ]]; then
+    if [[ "$BACKUP_DISK" =~ [0-9]$ ]]; then
         PARTITION_NAME="${BACKUP_DISK}p1"
     else
         PARTITION_NAME="${BACKUP_DISK}1"
     fi
 }
 
-get_system_disk() {
-    local root_source pkname
+get_system_disks() {
+    local root_source
     root_source="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
     [[ -n "$root_source" ]] || return 1
-    pkname="$(lsblk -no PKNAME "$root_source" 2>/dev/null | head -n1 || true)"
-    [[ -n "$pkname" ]] || return 1
-    printf '/dev/%s\n' "$pkname"
+    lsblk -nrpo NAME,TYPE "$root_source" 2>/dev/null | awk '$2 == "disk" {print $1}' | sort -u
+}
+
+get_system_disk() {
+    get_system_disks 2>/dev/null | head -n 1
 }
 
 list_candidate_backup_disks() {
-    local system_disk name type size model
-    system_disk="$(get_system_disk || true)"
+    local name type size model
+    local -a system_disks=()
+
+    while read -r name; do
+        [[ -n "$name" ]] || continue
+        system_disks+=("$name")
+    done < <(get_system_disks || true)
 
     while read -r name type size model; do
         [[ "$type" == "disk" ]] || continue
         [[ -n "$name" ]] || continue
-        [[ "/dev/${name}" == "$system_disk" ]] && continue
+        [[ "$name" == ram* || "$name" == zram* ]] && continue
+        if printf '%s\n' "${system_disks[@]}" | grep -Fxq "/dev/${name}"; then
+            continue
+        fi
         printf '/dev/%s|%s|%s\n' "$name" "$size" "${model:-unknown}"
     done < <(lsblk -dn -e 2,11 -o NAME,TYPE,SIZE,MODEL 2>/dev/null)
 }
@@ -430,7 +798,7 @@ show_candidate_backup_disks() {
     ui "${C_BOLD}Candidate repository disks:${C_RESET}"
     while IFS='|' read -r disk size model; do
         ui "  ${idx}) ${disk} - ${size} - ${model}"
-        ((idx++))
+        ((idx += 1))
     done < <(list_candidate_backup_disks)
 }
 
@@ -439,14 +807,17 @@ maybe_autodetect_backup_disk() {
     local last_candidate=""
     local disk size model
 
-    if [[ "$BACKUP_DISK" != "auto" && -b "$BACKUP_DISK" ]]; then
+    if [[ "$BACKUP_DISK" != "auto" ]]; then
+        BACKUP_DISK="$(canonicalize_block_device "$BACKUP_DISK")"
+        validate_block_device "$BACKUP_DISK" || die "The specified disk is not a valid block device: ${BACKUP_DISK}"
+        validate_repository_disk_device "$BACKUP_DISK" || die "The specified --disk must be a supported whole disk device, not a partition, mapper node, or ram disk: ${BACKUP_DISK}"
         return 0
     fi
 
     while IFS='|' read -r disk size model; do
         [[ -n "$disk" ]] || continue
         last_candidate="$disk"
-        ((candidate_count++))
+        ((candidate_count += 1))
     done < <(list_candidate_backup_disks)
 
     if (( candidate_count == 1 )); then
@@ -468,6 +839,37 @@ maybe_autodetect_backup_disk() {
     die "Multiple candidate disks were found. In non-interactive mode you must explicitly specify --disk /dev/sdX."
 }
 
+maybe_load_prepare_state() {
+    local current_backup_disk current_mount current_repo current_vg current_lv
+    local current_user current_group current_ssh_nets current_veeam_nets
+
+    [[ "$PHASE" == "post-attach-lockdown" ]] || return 0
+    [[ -r "$TIMESTAMP_FILE" ]] || return 0
+
+    current_backup_disk="$BACKUP_DISK"
+    current_mount="$MOUNT_POINT"
+    current_repo="$REPO_DIR"
+    current_vg="$VG_NAME"
+    current_lv="$LV_NAME"
+    current_user="$VEEAM_USER"
+    current_group="$VEEAM_GROUP"
+    current_ssh_nets="$SSH_ALLOWED_NETS"
+    current_veeam_nets="$VEEAM_ALLOWED_NETS"
+
+    # shellcheck disable=SC1090
+    . "$TIMESTAMP_FILE"
+
+    [[ "$current_backup_disk" != "$DEFAULT_BACKUP_DISK" ]] && BACKUP_DISK="$current_backup_disk"
+    [[ "$current_mount" != "$DEFAULT_MOUNT_POINT" ]] && MOUNT_POINT="$current_mount"
+    [[ "$current_repo" != "$DEFAULT_REPO_DIR" ]] && REPO_DIR="$current_repo"
+    [[ "$current_vg" != "$DEFAULT_VG_NAME" ]] && VG_NAME="$current_vg"
+    [[ "$current_lv" != "$DEFAULT_LV_NAME" ]] && LV_NAME="$current_lv"
+    [[ "$current_user" != "$DEFAULT_VEEAM_USER" ]] && VEEAM_USER="$current_user"
+    [[ "$current_group" != "$DEFAULT_VEEAM_GROUP" ]] && VEEAM_GROUP="$current_group"
+    [[ "$current_ssh_nets" != "$DEFAULT_SSH_ALLOWED_NETS" ]] && SSH_ALLOWED_NETS="$current_ssh_nets"
+    [[ "$current_veeam_nets" != "$DEFAULT_VEEAM_ALLOWED_NETS" ]] && VEEAM_ALLOWED_NETS="$current_veeam_nets"
+}
+
 autofill_repo_dir_from_mount() {
     if [[ -z "$REPO_DIR" || "$REPO_DIR" == "/backup" ]]; then
         REPO_DIR="${MOUNT_POINT%/}/backup"
@@ -484,28 +886,95 @@ find_repo_lv_path() {
     [[ -e "$lv_path" ]] && printf '%s\n' "$lv_path"
 }
 
-repo_lv_is_xfs() {
+vg_is_fully_on_target_disk() {
+    local vg_name="$1"
+    local count=0
+    local pv_name
+
+    while read -r pv_name; do
+        pv_name="$(normalize_ws "$pv_name")"
+        [[ -n "$pv_name" ]] || continue
+        ((count += 1))
+        device_belongs_to_disk "$BACKUP_DISK" "$pv_name" || return 1
+    done < <(get_pvs_for_vg "$vg_name")
+
+    (( count > 0 ))
+}
+
+find_target_repo_lv_path() {
     local lv_path
     lv_path="$(find_repo_lv_path || true)"
+    [[ -n "$lv_path" ]] || return 1
+    vg_is_fully_on_target_disk "$VG_NAME" || return 1
+    printf '%s\n' "$lv_path"
+}
+
+disk_has_partitions() {
+    lsblk -nrpo NAME "$1" 2>/dev/null | tail -n +2 | grep -q .
+}
+
+pv_assigned_vg() {
+    local pv_name="$1"
+    pvs --noheadings -o vg_name "$pv_name" 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -n 1
+}
+
+expected_repo_pv_target() {
+    if [[ "$USE_PARTITION" == "yes" ]]; then
+        detect_partition_name
+        printf '%s\n' "$PARTITION_NAME"
+    else
+        printf '%s\n' "$BACKUP_DISK"
+    fi
+}
+
+repo_storage_repairable() {
+    local lv_path pv_target pv_vg
+
+    lv_path="$(find_target_repo_lv_path || true)"
+    [[ -n "$lv_path" ]] && return 0
+
+    if vgs "$VG_NAME" >/dev/null 2>&1 && vg_is_fully_on_target_disk "$VG_NAME"; then
+        return 0
+    fi
+
+    pv_target="$(expected_repo_pv_target)"
+    if [[ "$USE_PARTITION" == "yes" && -b "$pv_target" ]]; then
+        if pvs "$pv_target" >/dev/null 2>&1 || ! device_has_existing_signatures "$pv_target"; then
+            return 0
+        fi
+    fi
+
+    if pvs "$pv_target" >/dev/null 2>&1; then
+        pv_vg="$(pv_assigned_vg "$pv_target")"
+        [[ -z "$pv_vg" || "$pv_vg" == "$VG_NAME" ]] && return 0
+    fi
+
+    return 1
+}
+
+repo_lv_is_xfs() {
+    local lv_path
+    lv_path="$(find_target_repo_lv_path || true)"
     [[ -n "$lv_path" ]] || return 1
     blkid "$lv_path" 2>/dev/null | grep -q 'TYPE="xfs"'
 }
 
 repo_storage_present() {
     local lv_path
-    lv_path="$(find_repo_lv_path || true)"
+    lv_path="$(find_target_repo_lv_path || true)"
     [[ -n "$lv_path" ]] || return 1
     repo_lv_is_xfs
 }
 
 repo_path_ready() {
-    local lv_path
-    lv_path="$(find_repo_lv_path || true)"
-    [[ -n "$lv_path" ]] || return 1
+    [[ -n "$(find_target_repo_lv_path || true)" ]] || return 1
     repo_lv_is_xfs || return 1
     [[ -d "$MOUNT_POINT" ]] || return 1
-    [[ -d "$REPO_DIR" ]] || return 1
-    return 0
+    if repo_lv_mounted_at_target "$MOUNT_POINT"; then
+        [[ -d "$REPO_DIR" ]] || return 1
+        return 0
+    fi
+    repo_lv_mounted_at_target "$REPO_DIR"
 }
 
 fspath_for_disk_nodes() {
@@ -528,27 +997,32 @@ ask_yes_no_default() {
     local answer
 
     [[ "$INTERACTIVE" == "yes" ]] || {
-        printf '%s\n' "$default"
+        PROMPT_RESULT="$default"
         return 0
     }
+
+    if tui_available; then
+        tui_yes_no "$prompt" "$default"
+        return 0
+    fi
 
     while true; do
         if [[ "$default" == "yes" ]]; then
             ui_inline "${C_BOLD}${prompt}${C_RESET} [Y/n]: "
-            read -r answer
+            read -r answer || die "Input stream closed while waiting for yes/no input."
             answer="${answer:-yes}"
         else
             ui_inline "${C_BOLD}${prompt}${C_RESET} [y/N]: "
-            read -r answer
+            read -r answer || die "Input stream closed while waiting for yes/no input."
             answer="${answer:-no}"
         fi
 
         if is_yes "$answer"; then
-            printf '%s\n' "yes"
+            PROMPT_RESULT="yes"
             return 0
         fi
         if is_no "$answer"; then
-            printf '%s\n' "no"
+            PROMPT_RESULT="no"
             return 0
         fi
         warn "Invalid answer. Use yes/no."
@@ -561,20 +1035,25 @@ ask_required_value() {
     local answer
 
     [[ "$INTERACTIVE" == "yes" ]] || {
-        printf '%s\n' "$current"
+        PROMPT_RESULT="$current"
         return 0
     }
 
+    if tui_available; then
+        tui_inputbox "$prompt" "$current"
+        return 0
+    fi
+
     while true; do
         ui_inline "${C_BOLD}${prompt}${C_RESET} [${current}]: "
-        read -r answer
+        read -r answer || die "Input stream closed while waiting for a required value."
         answer="${answer:-$current}"
         answer="$(normalize_ws "$answer")"
         [[ -n "$answer" ]] || {
             warn "The value cannot be empty."
             continue
         }
-        printf '%s\n' "$answer"
+        PROMPT_RESULT="$answer"
         return 0
     done
 }
@@ -596,7 +1075,8 @@ Phases:
 
   --phase post-attach-lockdown
       Run this after the first successful Veeam onboarding. It reduces
-      user privileges, protects Veeam certificate directories, and can block SSH.
+      user privileges, protects Veeam certificate directories, applies
+      stricter STIG-style hardening, and can block SSH.
 
 Modes:
   sudo $0
@@ -664,6 +1144,9 @@ Important note:
   - non-root
   - has a home directory
   - can elevate to root during the first onboarding if you want a persistent Data Mover
+  - owns the repository directory, with the matching primary group and 0700 permissions
+  - uses a repository path without symbolic links
+  Veeam infrastructure networks that need direct repository access must be allowed on ports 6160, 6162 and 2500:3300.
   Only after the repository has been added is it correct to remove sudo and, if desired, block SSH.
 =================================================================
 EOF
@@ -829,7 +1312,9 @@ validate_common_inputs() {
     [[ "$PHASE" == "prepare" || "$PHASE" == "post-attach-lockdown" ]] || die "Invalid phase: ${PHASE}"
 
     validate_linux_username "$VEEAM_USER" || die "Invalid username: ${VEEAM_USER}"
+    [[ "$VEEAM_USER" != "root" ]] || die "The Veeam onboarding account must be a non-root user."
     validate_group_name "$VEEAM_GROUP" || die "Invalid group name: ${VEEAM_GROUP}"
+    [[ "$VEEAM_GROUP" == "$VEEAM_USER" ]] || die "For a Veeam hardened repository, --veeam-group must match --veeam-user."
 
     for value in \
         "$USE_PARTITION" \
@@ -854,12 +1339,19 @@ validate_common_inputs() {
 validate_prepare_inputs() {
     maybe_autodetect_backup_disk
     autofill_repo_dir_from_mount
+    MOUNT_POINT="$(normalize_dir_path "$MOUNT_POINT")"
+    REPO_DIR="$(normalize_dir_path "$REPO_DIR")"
 
     validate_block_device "$BACKUP_DISK" || die "Invalid block device: ${BACKUP_DISK}"
+    validate_repository_disk_device "$BACKUP_DISK" || die "The selected --disk must be a supported whole disk device: ${BACKUP_DISK}"
     validate_mount_path "$MOUNT_POINT" || die "Invalid mount point: ${MOUNT_POINT}"
     validate_mount_path "$REPO_DIR" || die "Invalid repository directory: ${REPO_DIR}"
     validate_lv_size "$LV_SIZE" || die "Invalid LV_SIZE: ${LV_SIZE}"
+    [[ "$MOUNT_POINT" != "/" ]] || die "Refusing to use / as repository mount point."
+    [[ "$REPO_DIR" != "$MOUNT_POINT" ]] || die "REPO_DIR must be a dedicated subdirectory under MOUNT_POINT, not the mount point itself."
     path_is_under_mountpoint "$REPO_DIR" "$MOUNT_POINT" || die "REPO_DIR must be under MOUNT_POINT."
+    path_has_symlink_component "$MOUNT_POINT" && die "Veeam does not support symbolic links in the path to the hardened repository mount point: ${MOUNT_POINT}"
+    path_has_symlink_component "$REPO_DIR" && die "Veeam does not support symbolic links in the path to the hardened repository directory: ${REPO_DIR}"
 
     if [[ -n "$SSH_ALLOWED_NETS" ]]; then
         validate_net_csv "$SSH_ALLOWED_NETS" || die "Invalid SSH network list: ${SSH_ALLOWED_NETS}"
@@ -889,15 +1381,24 @@ pick_disk_interactive() {
     local idx=1
     local choice
     local disk size model
+    local -a menu_items=()
 
     while IFS='|' read -r disk size model; do
         [[ -n "$disk" ]] || continue
         disks+=("$disk")
         labels+=("${idx}) ${disk} - ${size} - ${model}")
-        ((idx++))
+        menu_items+=("$disk" "${size} ${model}")
+        ((idx += 1))
     done < <(list_candidate_backup_disks)
 
     (( ${#disks[@]} > 0 )) || die "No candidate disk is available."
+
+    if tui_available; then
+        choice="$(whiptail --title "$TUI_TITLE" --menu "Select the dedicated repository disk" 20 90 10 "${menu_items[@]}" 3>&1 1>&2 2>&3)" || die "Operation cancelled by the user."
+        BACKUP_DISK="$choice"
+        ok "Selected disk: ${BACKUP_DISK}"
+        return 0
+    fi
 
     ui "${C_BOLD}Select the dedicated repository disk:${C_RESET}"
     for label in "${labels[@]}"; do
@@ -906,7 +1407,7 @@ pick_disk_interactive() {
 
     while true; do
         ui_inline "Choice [1-${#disks[@]}]: "
-        read -r choice
+        read -r choice || die "Input stream closed while waiting for disk selection."
 
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#disks[@]} )); then
             BACKUP_DISK="${disks[$((choice-1))]}"
@@ -920,6 +1421,24 @@ pick_disk_interactive() {
 
 wizard_start_menu() {
     banner
+    if tui_available; then
+        local choice
+        choice="$(whiptail --title "$TUI_TITLE" --menu "Select an action" 18 86 8 \
+            "1" "Start prepare mode" \
+            "2" "Start post-attach-lockdown mode" \
+            "3" "Show quick help" \
+            "4" "Show extended help" \
+            "5" "Exit" \
+            3>&1 1>&2 2>&3)" || exit 0
+        case "$choice" in
+            1) PHASE="prepare"; return 0 ;;
+            2) PHASE="post-attach-lockdown"; return 0 ;;
+            3) show_help; exit 0 ;;
+            4) show_help_full; exit 0 ;;
+            5) exit 0 ;;
+        esac
+    fi
+
     cat <<EOF
 1) Start prepare mode
 2) Start post-attach-lockdown mode
@@ -929,7 +1448,7 @@ wizard_start_menu() {
 EOF
     local choice
     while true; do
-        read -r -p "Choice [1-5]: " choice
+        read -r -p "Choice [1-5]: " choice || die "Input stream closed while waiting for menu selection."
         case "$choice" in
             1) PHASE="prepare"; return 0 ;;
             2) PHASE="post-attach-lockdown"; return 0 ;;
@@ -945,19 +1464,31 @@ wizard_prepare_values() {
     section "W1" "Guided configuration"
 
     maybe_autodetect_backup_disk
-    SSH_ALLOWED_NETS="$(ask_required_value "Allowed SSH networks (comma-separated CIDRs)" "${SSH_ALLOWED_NETS:-192.168.10.0/24}")"
-    VEEAM_ALLOWED_NETS="$(ask_required_value "Allowed Veeam traffic networks (port 6162 and failover 2500:3300)" "${VEEAM_ALLOWED_NETS:-$SSH_ALLOWED_NETS}")"
-    BACKUP_DISK="$(ask_required_value "Dedicated repository disk" "${BACKUP_DISK:-/dev/sdb}")"
-    MOUNT_POINT="$(ask_required_value "Mount point" "$MOUNT_POINT")"
+    ask_required_value "Allowed SSH networks (comma-separated CIDRs)" "${SSH_ALLOWED_NETS:-192.168.10.0/24}"
+    SSH_ALLOWED_NETS="$PROMPT_RESULT"
+    ask_required_value "Allowed Veeam infrastructure networks (backup server, proxy, mount/gateway; ports 6160, 6162, 2500:3300)" "${VEEAM_ALLOWED_NETS:-$SSH_ALLOWED_NETS}"
+    VEEAM_ALLOWED_NETS="$PROMPT_RESULT"
+    ask_required_value "Mount point" "$MOUNT_POINT"
+    MOUNT_POINT="$PROMPT_RESULT"
     autofill_repo_dir_from_mount
-    REPO_DIR="$(ask_required_value "Repository directory" "$REPO_DIR")"
+    ask_required_value "Repository directory" "$REPO_DIR"
+    REPO_DIR="$PROMPT_RESULT"
 
-    ui ""
-    ui "${C_BOLD}Operational note:${C_RESET}"
-    ui "  During the prepare phase, the user ${VEEAM_USER} keeps full sudo"
-    ui "  to avoid issues during the first Veeam onboarding."
-    ui "  The actual lock-down is applied only in the next phase."
-    pause_enter
+    if tui_available; then
+        tui_msgbox "Selected repository disk: ${BACKUP_DISK}
+
+During the prepare phase, the user ${VEEAM_USER} keeps full sudo to avoid issues during the first Veeam onboarding.
+
+The actual lock-down is applied only in the next phase."
+    else
+        ui ""
+        ui "${C_BOLD}Operational note:${C_RESET}"
+        ui "  Selected repository disk: ${BACKUP_DISK}"
+        ui "  During the prepare phase, the user ${VEEAM_USER} keeps full sudo"
+        ui "  to avoid issues during the first Veeam onboarding."
+        ui "  The actual lock-down is applied only in the next phase."
+        pause_enter
+    fi
 }
 
 collect_grub_password_hash() {
@@ -969,8 +1500,12 @@ collect_grub_password_hash() {
     }
 
     section "W2" "GRUB password"
-    info "Enter a grub.pbkdf2 hash already generated with grub-mkpasswd-pbkdf2."
-    read -r -p "grub.pbkdf2 hash (leave blank to skip): " GRUB_PBKDF2_HASH
+    if tui_available; then
+        GRUB_PBKDF2_HASH="$(whiptail --title "$TUI_TITLE" --inputbox "Enter a grub.pbkdf2 hash already generated with grub-mkpasswd-pbkdf2. Leave blank to skip." 14 86 "$GRUB_PBKDF2_HASH" 3>&1 1>&2 2>&3)" || die "Operation cancelled by the user."
+    else
+        info "Enter a grub.pbkdf2 hash already generated with grub-mkpasswd-pbkdf2."
+        read -r -p "grub.pbkdf2 hash (leave blank to skip): " GRUB_PBKDF2_HASH || die "Input stream closed while waiting for the GRUB hash."
+    fi
     if [[ -z "$GRUB_PBKDF2_HASH" ]]; then
         warn "No hash provided. GRUB protection disabled."
         SET_GRUB_PASSWORD="no"
@@ -980,40 +1515,41 @@ collect_grub_password_hash() {
 # --------------------[ Prechecks ]--------------------
 check_runtime_not_on_target_mount() {
     local target_mount="$1"
+    local repo_target="${2:-}"
     local pwd_mount script_mount log_mount
 
     pwd_mount="$(path_mount_target "$PWD")"
-    script_mount="$(path_mount_target "$0")"
+    script_mount="$(path_mount_target "$SCRIPT_PATH")"
     log_mount="$(path_mount_target "$LOG_DIR")"
 
-    if [[ -n "$target_mount" && "$pwd_mount" == "$target_mount" ]]; then
+    if [[ -n "$target_mount" && "$pwd_mount" == "$target_mount" ]] || [[ -n "$repo_target" && "$pwd_mount" == "$repo_target" ]]; then
         warn "The current working directory is on the target mount. Switching to /root."
         ensure_safe_workdir
     fi
 
-    if [[ -n "$target_mount" && "$script_mount" == "$target_mount" ]]; then
+    if [[ -n "$target_mount" && "$script_mount" == "$target_mount" ]] || [[ -n "$repo_target" && "$script_mount" == "$repo_target" ]]; then
         die "The script appears to be running from the target mount. Copy it to /root or /tmp and run it again."
     fi
 
-    if [[ -n "$target_mount" && "$log_mount" == "$target_mount" ]]; then
+    if [[ -n "$target_mount" && "$log_mount" == "$target_mount" ]] || [[ -n "$repo_target" && "$log_mount" == "$repo_target" ]]; then
         die "The log directory is on the target mount. Stopping to avoid I/O on the disk being initialized."
     fi
 }
 
 check_disk_is_not_system_disk() {
-    local root_source pkname system_disk
+    local system_disk
+    local found="no"
 
-    root_source="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
-    [[ -n "$root_source" ]] || {
-        warn "Unable to determine the root device."
+    while read -r system_disk; do
+        [[ -n "$system_disk" ]] || continue
+        found="yes"
+        [[ "$BACKUP_DISK" != "$system_disk" ]] || die "The selected disk (${BACKUP_DISK}) appears to be a backing disk of the running system."
+    done < <(get_system_disks || true)
+
+    [[ "$found" == "yes" ]] || {
+        warn "Unable to determine the root backing disk."
         return 0
     }
-
-    pkname="$(lsblk -no PKNAME "$root_source" 2>/dev/null | head -n1 || true)"
-    [[ -n "$pkname" ]] || return 0
-
-    system_disk="/dev/${pkname}"
-    [[ "$BACKUP_DISK" != "$system_disk" ]] || die "The selected disk (${BACKUP_DISK}) appears to be the system disk."
 }
 
 device_has_existing_signatures() {
@@ -1080,8 +1616,10 @@ prechecks_prepare() {
     info "Detected system: ${OS_PRETTY_NAME:-unknown}"
     ubuntu_supported || die "This script supports Ubuntu 22.04 and 24.04."
 
+    veeam_agent_for_linux_installed && die "Veeam Agent for Linux appears to be installed on this server. Veeam documentation does not support using it on backup infrastructure components, including hardened repositories."
+
     ensure_safe_workdir
-    check_runtime_not_on_target_mount "$MOUNT_POINT"
+    check_runtime_not_on_target_mount "$MOUNT_POINT" "$REPO_DIR"
     check_disk_is_not_system_disk
 
     info "Current target disk layout:"
@@ -1091,6 +1629,8 @@ prechecks_prepare() {
     if device_has_existing_signatures "$BACKUP_DISK"; then
         if repo_storage_present; then
             ok "Disk signatures are present, but they appear to belong to the existing repository storage."
+        elif repo_storage_repairable; then
+            warn "Disk signatures are present, but they match a repairable partial repository layout. The script will reconcile the storage state."
         elif [[ "$FORCE_WIPE" == "yes" ]]; then
             warn "Disk signatures are present. They will be removed because FORCE_WIPE=yes."
         else
@@ -1112,8 +1652,10 @@ prechecks_prepare() {
 
     if mountpoint_in_use "$MOUNT_POINT"; then
         warn "The mount point ${MOUNT_POINT} is already mounted."
+    elif mountpoint_in_use "$REPO_DIR"; then
+        warn "The repository directory ${REPO_DIR} is already mounted."
     else
-        ok "The mount point ${MOUNT_POINT} is not mounted."
+        ok "Neither ${MOUNT_POINT} nor ${REPO_DIR} is currently mounted."
     fi
 
     if [[ -d "$MOUNT_POINT" ]] && dir_nonempty "$MOUNT_POINT"; then
@@ -1156,18 +1698,34 @@ prechecks_lockdown() {
     require_cmd gpasswd
     require_cmd id
     require_cmd install
-    require_cmd sshd
     require_cmd systemctl
-    require_cmd visudo
 
     getent passwd "$VEEAM_USER" >/dev/null 2>&1 || die "The user ${VEEAM_USER} does not exist."
     info "Target user: ${VEEAM_USER}"
+
+    veeam_agent_for_linux_installed && die "Veeam Agent for Linux appears to be installed on this server. Veeam documentation does not support using it on backup infrastructure components, including hardened repositories."
+
+    if alternate_admin_account_exists; then
+        ok "An alternate admin account in the sudo group is present."
+    elif root_password_is_locked; then
+        die "No alternate admin account was found in the sudo group, and the root password appears locked. Post-attach lockdown would remove the last practical administrative path."
+    else
+        warn "No alternate admin account was found in the sudo group. The root password appears set, so only local console recovery remains after lockdown."
+    fi
 
     if [[ ! -d /opt/veeam/transport/certs ]]; then
         warn "The directory /opt/veeam/transport/certs does not exist yet."
         warn "This usually means the first Data Mover deployment has not happened yet."
     else
         ok "Veeam certificate directory detected."
+    fi
+
+    if cmd_exists sshd; then
+        ok "OpenSSH server tooling detected."
+    elif [[ "$DISABLE_SSHD_AFTER_ATTACH" == "yes" ]]; then
+        info "OpenSSH server tooling is not present. This is acceptable because SSHD is configured to remain disabled after attach."
+    else
+        warn "OpenSSH server tooling is not present. The post-attach phase will install openssh-server so the SSH configuration can be validated and aligned."
     fi
 
     ok "Post-attach lockdown precheck completed."
@@ -1182,6 +1740,8 @@ install_packages() {
         xfsprogs
         gdisk
         parted
+        whiptail
+        libpam-pwquality
         openssh-server
         unattended-upgrades
         ufw
@@ -1207,6 +1767,32 @@ install_packages() {
     run_or_die "Install required packages" apt install -y "${missing[@]}"
 }
 
+install_lockdown_packages() {
+    section "1" "Lockdown packages"
+
+    local packages=(
+        auditd
+        audispd-plugins
+        aide
+        aide-common
+        openssh-server
+    )
+    local missing=()
+    local pkg
+
+    for pkg in "${packages[@]}"; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    done
+
+    if (( ${#missing[@]} == 0 )); then
+        ok "Required lockdown packages are already installed."
+        return 0
+    fi
+
+    run_or_die "APT update" apt update
+    run_or_die "Install lockdown packages" apt install -y "${missing[@]}"
+}
+
 ensure_post_package_commands() {
     local cmd
     for cmd in parted sgdisk pvcreate vgcreate lvcreate mkfs.xfs pvs vgs lvs partprobe xfs_info ufw visudo sshd augenrules auditctl; do
@@ -1218,12 +1804,38 @@ ensure_post_package_commands() {
 get_vgs_for_disk() {
     local disk="$1"
     local pv vg
-    while read -r pv vg; do
+    while IFS='|' read -r pv vg; do
+        pv="$(normalize_ws "$pv")"
+        vg="$(normalize_ws "$vg")"
         [[ -n "${pv:-}" && -n "${vg:-}" ]] || continue
         if device_belongs_to_disk "$disk" "$pv"; then
             printf '%s\n' "$vg"
         fi
     done < <(pvs --noheadings --separator '|' -o pv_name,vg_name 2>/dev/null | sed 's/^[[:space:]]*//')
+}
+
+get_pvs_for_vg() {
+    local wanted_vg="$1"
+    local pv vg
+    while IFS='|' read -r pv vg; do
+        pv="$(normalize_ws "$pv")"
+        vg="$(normalize_ws "$vg")"
+        [[ -n "$pv" && -n "$vg" ]] || continue
+        [[ "$vg" == "$wanted_vg" ]] || continue
+        printf '%s\n' "$pv"
+    done < <(pvs --noheadings --separator '|' -o pv_name,vg_name 2>/dev/null | sed 's/^[[:space:]]*//')
+}
+
+get_lvs_for_vg() {
+    local wanted_vg="$1"
+    local lv vg
+    while IFS='|' read -r lv vg; do
+        lv="$(normalize_ws "$lv")"
+        vg="$(normalize_ws "$vg")"
+        [[ -n "$lv" && -n "$vg" ]] || continue
+        [[ "$vg" == "$wanted_vg" ]] || continue
+        printf '%s\n' "$lv"
+    done < <(lvs --noheadings --separator '|' -o lv_name,vg_name 2>/dev/null | sed 's/^[[:space:]]*//')
 }
 
 wipe_target_disk_safely() {
@@ -1234,7 +1846,7 @@ wipe_target_disk_safely() {
     local -a processed_vgs=()
 
     ensure_safe_workdir
-    check_runtime_not_on_target_mount "$MOUNT_POINT"
+    check_runtime_not_on_target_mount "$MOUNT_POINT" "$REPO_DIR"
     check_disk_is_not_system_disk
 
     while read -r part mountp; do
@@ -1260,9 +1872,9 @@ wipe_target_disk_safely() {
         while read -r other_pv; do
             other_pv="$(normalize_ws "$other_pv")"
             [[ -n "$other_pv" ]] || continue
-            ((count++))
+            ((count += 1))
             device_belongs_to_disk "$disk" "$other_pv" || die "VG ${vg} also uses PV ${other_pv}, which is outside the target disk. Stopping for safety."
-        done < <(pvs --noheadings -o pv_name "$vg" 2>/dev/null || true)
+        done < <(get_pvs_for_vg "$vg")
 
         (( count > 0 )) || continue
 
@@ -1270,7 +1882,7 @@ wipe_target_disk_safely() {
             lv="$(normalize_ws "$lv")"
             [[ -n "$lv" ]] || continue
             run_or_die "Remove LV ${vg}/${lv}" lvremove -f "/dev/${vg}/${lv}"
-        done < <(lvs --noheadings -o lv_name "$vg" 2>/dev/null || true)
+        done < <(get_lvs_for_vg "$vg")
 
         run_or_die "Deactivate VG ${vg}" vgchange -an "$vg"
         run_or_die "Remove VG ${vg}" vgremove -f "$vg"
@@ -1313,41 +1925,64 @@ create_lvm() {
 
     local lv_path="/dev/${VG_NAME}/${LV_NAME}"
     local pv_target
+    local pv_existing_vg=""
     local -a lvcreate_args
 
     if [[ -e "$lv_path" ]]; then
-        repo_lv_is_xfs || die "LV ${lv_path} exists but does not appear to be XFS. Refusing to continue automatically."
-        ok "LV ${lv_path} already exists."
-        return 0
+        vg_is_fully_on_target_disk "$VG_NAME" || die "LV ${lv_path} already exists, but it does not belong to the selected target disk ${BACKUP_DISK}."
+        if repo_lv_is_xfs; then
+            ok "LV ${lv_path} already exists."
+            return 0
+        fi
+        if blkid "$lv_path" 2>/dev/null | grep -q 'TYPE='; then
+            [[ "$FORCE_WIPE" == "yes" ]] || die "LV ${lv_path} exists with a non-XFS filesystem. Use --force-wipe yes if you want the script to rebuild the selected disk."
+            warn "LV ${lv_path} exists with a non-XFS filesystem. Rebuilding the selected disk because FORCE_WIPE=yes."
+            wipe_target_disk_safely "$BACKUP_DISK"
+        else
+            ok "LV ${lv_path} already exists without a filesystem. The script will reuse it and continue with XFS creation."
+            return 0
+        fi
     fi
 
-    if [[ "$FORCE_WIPE" == "yes" ]]; then
+    if [[ "$FORCE_WIPE" == "yes" ]] && ! repo_storage_repairable; then
         wipe_target_disk_safely "$BACKUP_DISK"
     fi
 
-    if [[ "$USE_PARTITION" == "yes" ]]; then
-        detect_partition_name
-        run_or_die "Create GPT label" parted -s "$BACKUP_DISK" mklabel gpt
-        run_or_die "Create LVM partition" parted -s -a optimal "$BACKUP_DISK" mkpart primary 1MiB 100%
-        run_or_die "Set LVM flag" parted -s "$BACKUP_DISK" set 1 lvm on
-        run_or_die "Reload partition table" partprobe "$BACKUP_DISK"
-        run_or_die "Wait udev settle" udevadm settle
-        [[ -b "$PARTITION_NAME" ]] || die "Expected partition ${PARTITION_NAME} did not appear."
-        pv_target="$PARTITION_NAME"
+    if vgs "$VG_NAME" >/dev/null 2>&1; then
+        vg_is_fully_on_target_disk "$VG_NAME" || die "VG ${VG_NAME} already exists, but it does not belong exclusively to the selected target disk ${BACKUP_DISK}."
+        ok "VG ${VG_NAME} already exists on the selected target disk."
     else
-        pv_target="$BACKUP_DISK"
-    fi
+        pv_target="$(expected_repo_pv_target)"
 
-    if ! pvs "$pv_target" >/dev/null 2>&1; then
-        run_or_die "Create PV ${pv_target}" pvcreate -ff -y "$pv_target"
-    else
-        ok "PV ${pv_target} already exists."
-    fi
+        if [[ "$USE_PARTITION" == "yes" ]]; then
+            if [[ -b "$pv_target" ]]; then
+                ok "Repository partition ${pv_target} already exists."
+                if ! pvs "$pv_target" >/dev/null 2>&1 && device_has_existing_signatures "$pv_target"; then
+                    die "Partition ${pv_target} already contains signatures that are not an initialized repository PV. Use --force-wipe yes if you want to rebuild the selected disk."
+                fi
+            else
+                disk_has_partitions "$BACKUP_DISK" && die "The target disk already contains partitions, but the expected repository partition ${pv_target} is missing. Use --force-wipe yes to rebuild the disk cleanly."
+                run_or_die "Create GPT label" parted -s "$BACKUP_DISK" mklabel gpt
+                run_or_die "Create LVM partition" parted -s -a optimal "$BACKUP_DISK" mkpart primary 1MiB 100%
+                run_or_die "Set LVM flag" parted -s "$BACKUP_DISK" set 1 lvm on
+                run_or_die "Reload partition table" partprobe "$BACKUP_DISK"
+                run_or_die "Wait udev settle" udevadm settle
+                [[ -b "$pv_target" ]] || die "Expected partition ${pv_target} did not appear."
+            fi
+        fi
 
-    if ! vgs "$VG_NAME" >/dev/null 2>&1; then
+        if ! pvs "$pv_target" >/dev/null 2>&1; then
+            run_or_die "Create PV ${pv_target}" pvcreate -ff -y "$pv_target"
+        else
+            ok "PV ${pv_target} already exists."
+        fi
+
+        pv_existing_vg="$(pv_assigned_vg "$pv_target")"
+        if [[ -n "$pv_existing_vg" && "$pv_existing_vg" != "$VG_NAME" ]]; then
+            die "PV ${pv_target} already belongs to VG ${pv_existing_vg}, not to the expected VG ${VG_NAME}. Use --force-wipe yes if you want to rebuild the selected disk."
+        fi
+
         run_or_die "Create VG ${VG_NAME}" vgcreate "$VG_NAME" "$pv_target"
-    else
-        die "VG ${VG_NAME} already exists but the expected LV is not ready. Fix the VG name or clean it up manually."
     fi
 
     lvcreate_args=(-n "$LV_NAME")
@@ -1379,53 +2014,156 @@ create_xfs() {
 
 ensure_fstab_entry() {
     local lv_path="$1"
-    local uuid existing
+    local target_path="$2"
+    local uuid existing source target current_opts
     uuid="$(blkid -s UUID -o value "$lv_path")"
     [[ -n "$uuid" ]] || die "Unable to read the UUID of ${lv_path}."
 
-    existing="$(awk -v target="$MOUNT_POINT" '$1 !~ /^#/ && $2 == target {print $0}' /etc/fstab 2>/dev/null || true)"
+    target_path="$(normalize_dir_path "$target_path")"
+    existing="$(awk -v target="$target_path" '$1 !~ /^#/ && $2 == target {print $0}' /etc/fstab 2>/dev/null || true)"
     if [[ -n "$existing" ]]; then
-        if grep -Fq "UUID=${uuid}" <<< "$existing"; then
-            ok "fstab entry already present for ${MOUNT_POINT}."
+        source="$(awk '{print $1}' <<< "$existing")"
+        current_opts="$(awk '{print $4}' <<< "$existing")"
+        if fstab_source_matches_lv "$source" "$uuid" "$lv_path"; then
+            if [[ "$current_opts" == "$FSTAB_OPTS" ]]; then
+                ok "fstab entry already present for ${target_path}."
+            else
+                warn "fstab entry for ${target_path} exists but uses different mount options. Rewriting it to ${FSTAB_OPTS}."
+                replace_fstab_target_entry "$target_path" "$uuid"
+            fi
             return 0
         fi
-        die "An fstab entry already exists for ${MOUNT_POINT}, but it does not point to the expected LV: ${existing}"
+        warn "fstab entry for ${target_path} exists but does not point to the expected LV. Rewriting it."
+        replace_fstab_target_entry "$target_path" "$uuid"
+        return 0
     fi
 
-    if grep -Fq "UUID=${uuid}" /etc/fstab 2>/dev/null; then
-        die "UUID ${uuid} is already present in /etc/fstab on another line. Verify it manually."
-    fi
+    while read -r source target; do
+        [[ -n "$source" && -n "$target" ]] || continue
+        target="$(normalize_dir_path "$target")"
+        if fstab_source_matches_lv "$source" "$uuid" "$lv_path"; then
+            if [[ "$target" == "$MOUNT_POINT" || "$target" == "$REPO_DIR" ]]; then
+                ok "fstab entry already present for ${target}."
+                return 0
+            fi
+            die "The repository LV is already present in /etc/fstab with an unsupported target path: ${target}"
+        fi
+    done < <(awk '$1 !~ /^#/ && NF >= 2 {print $1, $2}' /etc/fstab 2>/dev/null || true)
 
     if [[ "$DRY_RUN" == "yes" ]]; then
-        info "DRY-RUN add fstab: UUID=${uuid} ${MOUNT_POINT} xfs ${FSTAB_OPTS} 0 0"
+        info "DRY-RUN add fstab: UUID=${uuid} ${target_path} xfs ${FSTAB_OPTS} 0 0"
         return 0
     fi
 
     backup_file /etc/fstab
-    printf 'UUID=%s %s xfs %s 0 0\n' "$uuid" "$MOUNT_POINT" "$FSTAB_OPTS" >> /etc/fstab
+    printf 'UUID=%s %s xfs %s 0 0\n' "$uuid" "$target_path" "$FSTAB_OPTS" >> /etc/fstab
 }
 
 mount_repo() {
     section "5" "Mount repository"
 
     local lv_path="/dev/${VG_NAME}/${LV_NAME}"
+    local expected_source mounted_source mount_target
     run_or_die "Create mount point ${MOUNT_POINT}" mkdir -p "$MOUNT_POINT"
-    ensure_fstab_entry "$lv_path"
+    run_or_die "Create repository dir ${REPO_DIR}" mkdir -p "$REPO_DIR"
 
-    if ! mountpoint_in_use "$MOUNT_POINT"; then
-        run_or_die "Mount ${MOUNT_POINT}" mount "$MOUNT_POINT"
-    else
-        ok "${MOUNT_POINT} is already mounted."
+    expected_source="$(canonicalize_block_device "$lv_path")"
+    mount_target="$(find_existing_repo_mount_target "$lv_path" || true)"
+    mount_target="${mount_target:-$MOUNT_POINT}"
+
+    if [[ "$mount_target" == "$REPO_DIR" ]]; then
+        info "Existing repository layout detected: the LV will be mounted directly on ${REPO_DIR}."
     fi
 
-    run_or_die "Verify mount ${MOUNT_POINT}" findmnt "$MOUNT_POINT"
-    run_or_die "Verify XFS ${MOUNT_POINT}" xfs_info "$MOUNT_POINT"
-    run_or_die "Create repository dir ${REPO_DIR}" mkdir -p "$REPO_DIR"
+    if mountpoint_in_use "$mount_target"; then
+        mounted_source="$(mountpoint_source "$mount_target" 2>/dev/null || true)"
+        mounted_source="$(canonicalize_block_device "$mounted_source")"
+        [[ "$mounted_source" == "$expected_source" ]] || die "Target ${mount_target} is already mounted from ${mounted_source}, not from ${lv_path}."
+        ok "${mount_target} is already mounted from the expected LV."
+    fi
+
+    ensure_fstab_entry "$lv_path" "$mount_target"
+
+    if ! mountpoint_in_use "$mount_target"; then
+        run_or_die "Mount ${mount_target}" mount "$mount_target"
+    fi
+
+    run_or_die "Verify mount ${mount_target}" findmnt "$mount_target"
+    run_or_die "Verify XFS ${mount_target}" xfs_info "$mount_target"
 }
 
 # --------------------[ Account ]--------------------
 user_password_status() {
     passwd -S "$1" 2>/dev/null | awk '{print $2}' || true
+}
+
+has_interactive_login_shell() {
+    local user="$1"
+    local shell_path
+
+    shell_path="$(getent passwd "$user" | awk -F: '{print $7}' || true)"
+    [[ -n "$shell_path" ]] || return 1
+    case "$shell_path" in
+        */false|*/nologin)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+alternate_admin_account_exists() {
+    local members_csv member
+
+    members_csv="$(getent group sudo | awk -F: '{print $4}' || true)"
+    [[ -n "$members_csv" ]] || return 1
+
+    IFS=',' read -r -a sudo_members <<< "$members_csv"
+    for member in "${sudo_members[@]}"; do
+        member="$(normalize_ws "$member")"
+        [[ -n "$member" ]] || continue
+        [[ "$member" == "$VEEAM_USER" ]] && continue
+        has_interactive_login_shell "$member" || continue
+        return 0
+    done
+
+    return 1
+}
+
+user_has_authorized_keys() {
+    local user="$1"
+    local home_dir
+
+    home_dir="$(getent passwd "$user" | awk -F: '{print $6}' || true)"
+    [[ -n "$home_dir" ]] || return 1
+    [[ -s "${home_dir}/.ssh/authorized_keys" ]]
+}
+
+alternate_admin_key_login_exists() {
+    local members_csv member
+
+    members_csv="$(getent group sudo | awk -F: '{print $4}' || true)"
+    [[ -n "$members_csv" ]] || return 1
+
+    IFS=',' read -r -a sudo_members <<< "$members_csv"
+    for member in "${sudo_members[@]}"; do
+        member="$(normalize_ws "$member")"
+        [[ -n "$member" ]] || continue
+        [[ "$member" == "$VEEAM_USER" ]] && continue
+        has_interactive_login_shell "$member" || continue
+        user_has_authorized_keys "$member" || continue
+        return 0
+    done
+
+    return 1
+}
+
+root_password_is_locked() {
+    case "$(user_password_status root)" in
+        L|LK|NP)
+            return 0
+            ;;
+    esac
+    return 1
 }
 
 create_veeam_user_prepare() {
@@ -1445,10 +2183,8 @@ create_veeam_user_prepare() {
         else
             printf '%s:%s\n' "$VEEAM_USER" "$VEEAM_PASSWORD" | chpasswd
         fi
-        VEEAM_USER_WAS_CREATED="yes"
     else
         ok "User ${VEEAM_USER} already exists."
-        VEEAM_USER_WAS_CREATED="no"
         if [[ "$RESET_EXISTING_VEEAM_PASSWORD" == "yes" ]]; then
             VEEAM_PASSWORD="$(generate_random_password)"
             if [[ "$DRY_RUN" == "yes" ]]; then
@@ -1462,12 +2198,15 @@ create_veeam_user_prepare() {
                 L|NP)
                     warn "The user ${VEEAM_USER} exists but appears to have a locked or missing password."
                     warn "For the first onboarding with single-use credentials, you may need to set a valid password."
-                    ;;
+                ;;
             esac
         fi
     fi
 
+    run_or_die "Align home and shell for ${VEEAM_USER}" usermod -d "/home/${VEEAM_USER}" -m -s /bin/bash "$VEEAM_USER"
+    run_or_die "Set primary group of ${VEEAM_USER} to ${VEEAM_GROUP}" usermod -g "$VEEAM_GROUP" "$VEEAM_USER"
     run_or_die "Add ${VEEAM_USER} to the sudo group for the first attach" usermod -aG sudo "$VEEAM_USER"
+    run_or_die "Ensure home directory exists for ${VEEAM_USER}" install -d -m 0750 -o "$VEEAM_USER" -g "$VEEAM_GROUP" "/home/${VEEAM_USER}"
 
     if [[ "$DRY_RUN" == "yes" ]]; then
         info "DRY-RUN set ownership/permissions on ${MOUNT_POINT} and ${REPO_DIR}"
@@ -1513,8 +2252,61 @@ Unattended-Upgrade::Automatic-Reboot-Time "03:30";
 EOF
 }
 
+configure_account_policy_prepare() {
+    section "8" "Account and session policy"
+
+    set_spaced_kv_in_file "PASS_MIN_DAYS" "1" /etc/login.defs
+    set_spaced_kv_in_file "PASS_MAX_DAYS" "60" /etc/login.defs
+    set_spaced_kv_in_file "PASS_WARN_AGE" "7" /etc/login.defs
+    set_spaced_kv_in_file "UMASK" "077" /etc/login.defs
+
+    write_file "/etc/profile.d/70-veeam-shell-timeout.sh" "0644" "root" "root" <<'EOF'
+case $- in
+    *i*)
+        TMOUT=600
+        readonly TMOUT
+        export TMOUT
+        ;;
+esac
+EOF
+}
+
+configure_password_quality_prepare() {
+    section "9" "Password quality"
+
+    local file="/etc/security/pwquality.conf"
+
+    set_kv_in_file "minlen" "15" "$file"
+    set_kv_in_file "minclass" "4" "$file"
+    set_kv_in_file "difok" "8" "$file"
+    set_kv_in_file "dcredit" "-1" "$file"
+    set_kv_in_file "ucredit" "-1" "$file"
+    set_kv_in_file "lcredit" "-1" "$file"
+    set_kv_in_file "ocredit" "-1" "$file"
+    set_kv_in_file "maxrepeat" "3" "$file"
+    set_kv_in_file "dictcheck" "1" "$file"
+    set_kv_in_file "enforcing" "1" "$file"
+
+    set_pam_module_line \
+        "/etc/pam.d/common-password" \
+        '^[[:space:]]*password[[:space:]].*pam_pwquality[.]so([[:space:]]|$)' \
+        'password\trequisite\t\t\tpam_pwquality.so retry=3' \
+        '^[[:space:]]*password[[:space:]]*[[]success=1[[:space:]]+default=ignore[]][[:space:]]*pam_unix[.]so([[:space:]]|$)'
+}
+
+configure_time_sync_prepare() {
+    section "10" "Time synchronization"
+
+    if ! cmd_exists timedatectl; then
+        warn "timedatectl is not available. Skipping time synchronization enforcement."
+        return 0
+    fi
+
+    run "Enable NTP synchronization" timedatectl set-ntp true || warn "Unable to enable NTP synchronization automatically. Verify your chrony or timesyncd configuration."
+}
+
 configure_banners() {
-    section "8" "Legal banners"
+    section "11" "Legal banners"
 
     write_file "/etc/issue.net" "0644" "root" "root" <<'EOF'
 ******************************************************
@@ -1533,7 +2325,7 @@ EOF
 }
 
 configure_kernel_sysctl() {
-    section "9" "Kernel hardening"
+    section "12" "Kernel hardening"
 
     local file="/etc/sysctl.d/60-veeam-hardening.conf"
     local enable_userns_key="no"
@@ -1580,6 +2372,17 @@ EOF
 
 ensure_sshd_include_dropins() {
     local include_line='Include /etc/ssh/sshd_config.d/*.conf'
+    if [[ ! -e /etc/ssh/sshd_config ]]; then
+        if [[ "$DRY_RUN" == "yes" ]]; then
+            info "DRY-RUN create /etc/ssh/sshd_config with Include directive"
+            return 0
+        fi
+        write_file "/etc/ssh/sshd_config" "0600" "root" "root" <<EOF
+${include_line}
+EOF
+        return 0
+    fi
+
     grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf[[:space:]]*$' /etc/ssh/sshd_config && return 0
 
     if [[ "$DRY_RUN" == "yes" ]]; then
@@ -1597,7 +2400,7 @@ ensure_sshd_include_dropins() {
 }
 
 configure_ssh_prepare() {
-    section "10" "SSH configuration for first attach"
+    section "13" "SSH configuration for first attach"
 
     local password_auth="yes"
     [[ "$ALLOW_PASSWORD_AUTH" == "yes" ]] || password_auth="no"
@@ -1605,20 +2408,30 @@ configure_ssh_prepare() {
     ensure_sshd_include_dropins
     install -d -m 0755 /etc/ssh/sshd_config.d
 
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN remove post-attach deny rule for ${VEEAM_USER} if present"
+    else
+        rm -f /etc/ssh/sshd_config.d/99-veeamrepo-deny.conf
+    fi
+
     write_file "/etc/ssh/sshd_config.d/90-veeam-hardening.conf" "0644" "root" "root" <<EOF
 PermitRootLogin no
+UsePAM yes
 PasswordAuthentication ${password_auth}
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
+PermitEmptyPasswords no
 MaxAuthTries 3
 MaxSessions 4
 AllowAgentForwarding no
 AllowTcpForwarding no
 X11Forwarding no
+X11UseLocalhost yes
 PermitUserEnvironment no
 ClientAliveInterval 300
 ClientAliveCountMax 2
 LoginGraceTime 60
+MACs hmac-sha2-512,hmac-sha2-256
 Banner /etc/issue.net
 EOF
 
@@ -1628,7 +2441,7 @@ EOF
 }
 
 configure_sudo_logging() {
-    section "11" "Sudo logging"
+    section "14" "Sudo logging"
 
     write_file "/etc/sudoers.d/01-veeam-logging" "0440" "root" "root" <<'EOF'
 Defaults logfile=/var/log/sudo.log
@@ -1641,7 +2454,7 @@ EOF
 }
 
 configure_auditd() {
-    section "12" "Auditd"
+    section "15" "Auditd"
 
     write_file "/etc/audit/rules.d/50-veeam-hardening.rules" "0640" "root" "root" <<EOF
 -D
@@ -1655,6 +2468,10 @@ configure_auditd() {
 -w /etc/group -p wa -k identity
 -w /etc/shadow -p wa -k identity
 -w /etc/gshadow -p wa -k identity
+-w /etc/login.defs -p wa -k auth_policy
+-w /etc/security/pwquality.conf -p wa -k auth_policy
+-w /etc/pam.d/common-password -p wa -k auth_policy
+-w /etc/profile.d/70-veeam-shell-timeout.sh -p wa -k session_policy
 -w ${REPO_DIR} -p wa -k veeamrepo
 EOF
 
@@ -1669,7 +2486,7 @@ EOF
 }
 
 configure_rsyslog_journal() {
-    section "13" "Rsyslog e journald"
+    section "16" "Rsyslog e journald"
 
     write_file "/etc/rsyslog.d/90-veeam-hardening.conf" "0644" "root" "root" <<'EOF'
 *.emerg :omusrmsg:*
@@ -1703,7 +2520,7 @@ EOF
 }
 
 configure_apparmor() {
-    section "14" "AppArmor"
+    section "17" "AppArmor"
     run "Check AppArmor status" aa-status || true
     info "AppArmor is left in enforcing mode when already present."
 }
@@ -1715,7 +2532,7 @@ ensure_ufw_rule() {
 }
 
 configure_ufw() {
-    section "15" "Firewall UFW"
+    section "18" "Firewall UFW"
 
     [[ "$ENABLE_UFW" == "yes" ]] || {
         info "UFW is left disabled by configuration."
@@ -1727,11 +2544,11 @@ configure_ufw() {
 
     ufw status 2>/dev/null | grep -q "Status: active" && ufw_active="yes"
 
-    if [[ "$ufw_active" == "no" ]]; then
-        run_or_die "UFW default deny incoming" ufw default deny incoming
-        run_or_die "UFW default allow outgoing" ufw default allow outgoing
-    else
+    run_or_die "UFW default deny incoming" ufw default deny incoming
+    run_or_die "UFW default allow outgoing" ufw default allow outgoing
+    if [[ "$ufw_active" == "yes" ]]; then
         info "UFW is already active: no global reset will be performed, only the required rules will be added."
+        warn "Existing UFW rules are preserved. Review them manually to remove legacy broad allows that would weaken the hardened baseline."
     fi
 
     ensure_ufw_rule "Allow loopback inbound" allow in on lo
@@ -1748,6 +2565,7 @@ configure_ufw() {
     for net in "${veeam_nets[@]}"; do
         net="$(normalize_ws "$net")"
         [[ -n "$net" ]] || continue
+        ensure_ufw_rule "Allow Veeam installer 6160 from ${net}" allow from "$net" to any port 6160 proto tcp
         ensure_ufw_rule "Allow Veeam transport 6162 from ${net}" allow from "$net" to any port 6162 proto tcp
         ensure_ufw_rule "Allow Veeam failover 2500:3300 from ${net}" allow from "$net" to any port 2500:3300 proto tcp
     done
@@ -1770,7 +2588,7 @@ configure_ufw() {
 }
 
 configure_grub_password() {
-    section "16" "GRUB protection"
+    section "19" "GRUB protection"
 
     [[ "$SET_GRUB_PASSWORD" == "yes" ]] || {
         info "GRUB protection not requested."
@@ -1779,7 +2597,7 @@ configure_grub_password() {
 
     [[ -n "$GRUB_PBKDF2_HASH" || "$DRY_RUN" == "yes" ]] || die "Missing GRUB PBKDF2 hash."
 
-    write_file "/etc/grub.d/40_custom" "0755" "root" "root" <<EOF
+    write_file "/etc/grub.d/01_veeam_superusers" "0755" "root" "root" <<EOF
 set superusers="root"
 password_pbkdf2 root ${GRUB_PBKDF2_HASH}
 EOF
@@ -1788,7 +2606,7 @@ EOF
 }
 
 lock_root_password_if_requested() {
-    section "17" "Root password"
+    section "20" "Root password"
 
     [[ "$LOCK_ROOT_PASSWORD" == "yes" ]] || {
         info "Root password left unchanged by configuration."
@@ -1798,9 +2616,283 @@ lock_root_password_if_requested() {
     run_or_die "Lock root password" passwd -l root
 }
 
+configure_account_policy_post_attach() {
+    section "21" "STIG account policy post-attach"
+
+    set_spaced_kv_in_file "ENCRYPT_METHOD" "YESCRYPT" /etc/login.defs
+    set_spaced_kv_in_file "FAILLOG_ENAB" "yes" /etc/login.defs
+    set_line_matching_regex '^[#[:space:]]*[*][[:space:]]+hard[[:space:]]+maxlogins([[:space:]]|$)' '* hard maxlogins 10' /etc/security/limits.conf
+}
+
+configure_pam_post_attach() {
+    section "22" "PAM lockout and password history"
+
+    local faillock_file="/etc/security/faillock.conf"
+
+    set_line_matching_regex '^[#[:space:]]*audit([[:space:]]|$)' 'audit' "$faillock_file"
+    set_line_matching_regex '^[#[:space:]]*silent([[:space:]]|$)' 'silent' "$faillock_file"
+    set_kv_in_file "deny" "3" "$faillock_file"
+    set_kv_in_file "fail_interval" "900" "$faillock_file"
+    set_kv_in_file "unlock_time" "900" "$faillock_file"
+    set_line_matching_regex '^[#[:space:]]*enforce_for_root([[:space:]]|$)' 'enforce_for_root' /etc/security/pwquality.conf
+
+    set_pam_module_line \
+        "/etc/pam.d/common-auth" \
+        '^[[:space:]]*auth[[:space:]].*pam_faillock[.]so[[:space:]]+authsucc([[:space:]]|$)' \
+        'auth	sufficient			pam_faillock.so authsucc' \
+        '^[[:space:]]*auth[[:space:]]*requisite[[:space:]].*pam_deny[.]so([[:space:]]|$)'
+
+    set_pam_module_line \
+        "/etc/pam.d/common-auth" \
+        '^[[:space:]]*auth[[:space:]].*pam_faillock[.]so[[:space:]]+authfail([[:space:]]|$)' \
+        'auth	[default=die]		pam_faillock.so authfail' \
+        '^[[:space:]]*auth[[:space:]].*pam_faillock[.]so[[:space:]]+authsucc([[:space:]]|$)'
+
+    set_pam_module_line \
+        "/etc/pam.d/common-auth" \
+        '^[[:space:]]*auth[[:space:]].*pam_faillock[.]so[[:space:]]+preauth([[:space:]]|$)' \
+        'auth	required			pam_faillock.so preauth' \
+        '^[[:space:]]*auth[[:space:]].*pam_unix[.]so([[:space:]]|$)'
+
+    set_pam_module_line \
+        "/etc/pam.d/common-auth" \
+        '^[[:space:]]*auth[[:space:]].*pam_faildelay[.]so([[:space:]]|$)' \
+        'auth	required			pam_faildelay.so delay=4000000' \
+        '^[[:space:]]*auth[[:space:]].*pam_faillock[.]so[[:space:]]+preauth([[:space:]]|$)'
+
+    set_pam_module_line \
+        "/etc/pam.d/common-password" \
+        '^[[:space:]]*password[[:space:]].*pam_pwquality[.]so([[:space:]]|$)' \
+        'password	requisite			pam_pwquality.so retry=3 enforce_for_root' \
+        '^[[:space:]]*password[[:space:]].*pam_unix[.]so([[:space:]]|$)'
+
+    set_pam_module_line \
+        "/etc/pam.d/common-password" \
+        '^[[:space:]]*password[[:space:]]*[[]success=1[[:space:]]+default=ignore[]][[:space:]]*pam_unix[.]so([[:space:]]|$)' \
+        'password	[success=1 default=ignore]	pam_unix.so obscure yescrypt remember=5' \
+        '^[[:space:]]*password[[:space:]]*requisite[[:space:]].*pam_deny[.]so([[:space:]]|$)'
+}
+
+configure_auditd_post_attach() {
+    section "23" "Auditd strict post-attach"
+
+    write_file "/etc/audit/rules.d/60-veeam-stig-post-attach.rules" "0640" "root" "root" <<EOF
+-w /etc/pam.d/common-auth -p wa -k auth_policy
+-w /etc/security/faillock.conf -p wa -k auth_policy
+-w /etc/security/limits.conf -p wa -k session_policy
+-w /etc/issue -p wa -k banners
+-w /etc/issue.net -p wa -k banners
+-w /etc/motd -p wa -k banners
+-w ${MOUNT_POINT} -p wa -k veeamrepo_mount
+-w /var/log/sudo.log -p wa -k maintenance
+-w /var/log/wtmp -p wa -k logins
+-w /var/log/btmp -p wa -k logins
+-w /var/log/lastlog -p wa -k logins
+-a always,exit -F path=/bin/su -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-priv_change
+-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=4294967295 -k priv_cmd
+-a always,exit -F path=/usr/bin/sudoedit -F perm=x -F auid>=1000 -F auid!=4294967295 -k priv_cmd
+-a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-passwd
+-a always,exit -F path=/usr/bin/gpasswd -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-gpasswd
+-a always,exit -F path=/usr/bin/chage -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-chage
+-a always,exit -F path=/usr/sbin/usermod -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-usermod
+-a always,exit -F path=/usr/bin/crontab -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-crontab
+-a always,exit -F path=/usr/bin/mount -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-mount
+-a always,exit -F path=/usr/bin/umount -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged-umount
+-a always,exit -F arch=b32 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_chng
+-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_chng
+-a always,exit -F arch=b32 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=4294967295 -k perm_chng
+-a always,exit -F arch=b64 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=4294967295 -k perm_chng
+-a always,exit -F arch=b32 -S setxattr,fsetxattr,lsetxattr,removexattr,fremovexattr,lremovexattr -F auid>=1000 -F auid!=-1 -k perm_mod
+-a always,exit -F arch=b64 -S setxattr,fsetxattr,lsetxattr,removexattr,fremovexattr,lremovexattr -F auid>=1000 -F auid!=-1 -k perm_mod
+-a always,exit -F arch=b32 -S creat,open,openat,open_by_handle_at,truncate,ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=-1 -k perm_access
+-a always,exit -F arch=b32 -S creat,open,openat,open_by_handle_at,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=-1 -k perm_access
+-a always,exit -F arch=b64 -S creat,open,openat,open_by_handle_at,truncate,ftruncate -F exit=-EPERM -F auid>=1000 -F auid!=-1 -k perm_access
+-a always,exit -F arch=b64 -S creat,open,openat,open_by_handle_at,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=-1 -k perm_access
+-a always,exit -F arch=b32 -S unlink,unlinkat,rename,renameat,rmdir -F auid>=1000 -F auid!=4294967295 -k delete
+-a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat,rmdir -F auid>=1000 -F auid!=4294967295 -k delete
+-a always,exit -F arch=b32 -S init_module,finit_module,delete_module -F auid>=1000 -F auid!=4294967295 -k module_chng
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -F auid>=1000 -F auid!=4294967295 -k module_chng
+-a always,exit -F arch=b32 -S execve -C uid!=euid -F euid=0 -F key=execpriv
+-a always,exit -F arch=b32 -S execve -C gid!=egid -F egid=0 -F key=execpriv
+-a always,exit -F arch=b64 -S execve -C uid!=euid -F euid=0 -F key=execpriv
+-a always,exit -F arch=b64 -S execve -C gid!=egid -F egid=0 -F key=execpriv
+EOF
+
+    backup_file /etc/audit/auditd.conf
+    set_kv_in_file "flush" "INCREMENTAL_ASYNC" /etc/audit/auditd.conf
+    set_kv_in_file "freq" "50" /etc/audit/auditd.conf
+    set_kv_in_file "admin_space_left_action" "SINGLE" /etc/audit/auditd.conf
+    set_kv_in_file "disk_full_action" "SUSPEND" /etc/audit/auditd.conf
+    set_kv_in_file "disk_error_action" "SYSLOG" /etc/audit/auditd.conf
+    set_kv_in_file "action_mail_acct" "root" /etc/audit/auditd.conf
+
+    run_or_die "Enable auditd" systemctl enable --now auditd
+    run_or_die "Load strict audit rules" augenrules --load
+}
+
+configure_aide_post_attach() {
+    section "24" "AIDE integrity monitoring"
+
+    local mount_regex repo_regex
+    local aide_db="/var/lib/aide/aide.db"
+    local aide_db_gz="/var/lib/aide/aide.db.gz"
+
+    if ! cmd_exists aideinit; then
+        [[ "$DRY_RUN" == "yes" ]] || die "Missing command: aideinit"
+        info "DRY-RUN assumes aideinit will be provided by the aide package installation step."
+    fi
+    mount_regex="$(escape_path_regex "$MOUNT_POINT")"
+    repo_regex="$(escape_path_regex "$REPO_DIR")"
+
+    write_file "/etc/aide/aide.conf.d/98-veeam-hardening-excludes" "0644" "root" "root" <<EOF
+!${mount_regex}$ 0
+!${mount_regex}/.*$ 0
+!${repo_regex}$ 0
+!${repo_regex}/.*$ 0
+EOF
+
+    set_kv_in_file "SILENTREPORTS" "no" /etc/default/aide
+    if [[ -e "$aide_db" || -e "$aide_db_gz" ]]; then
+        info "An AIDE database already exists. The current baseline is preserved."
+        warn "If you intentionally want to accept the current filesystem as the new AIDE baseline, run aideinit -y -f manually after reviewing the host state."
+    else
+        run_or_die "Initialize AIDE database" aideinit -y -f
+    fi
+
+    if systemctl list-unit-files dailyaidecheck.timer 2>/dev/null | grep -Fq 'dailyaidecheck.timer'; then
+        run_or_die "Enable AIDE daily check timer" systemctl enable --now dailyaidecheck.timer
+    else
+        info "AIDE daily timer was not found. Package defaults will be used."
+    fi
+}
+
+enforce_sticky_bit_post_attach() {
+    section "25" "Sticky bit on public directories"
+
+    local fs_path dir fixed_count=0
+
+    while read -r fs_path; do
+        fs_path="$(normalize_dir_path "$fs_path")"
+        [[ -n "$fs_path" ]] || continue
+
+        case "$fs_path" in
+            /proc|/sys|/dev|/run|/snap|/mnt|/mnt/*|/media|/media/*)
+                continue
+                ;;
+        esac
+
+        path_is_under_mountpoint "$fs_path" "$MOUNT_POINT" && continue
+
+        while read -r dir; do
+            [[ -n "$dir" ]] || continue
+            case "$dir" in
+                /mnt|/mnt/*|/media|/media/*)
+                    continue
+                    ;;
+            esac
+            if mountpoint_in_use "$dir" && [[ "$dir" != "$fs_path" ]]; then
+                continue
+            fi
+            ((fixed_count += 1))
+            run_or_die "Set sticky bit on ${dir}" chmod +t "$dir"
+        done < <(find "$fs_path" -xdev -type d -perm -0002 ! -perm -1000 2>/dev/null || true)
+    done < <(df --local -P 2>/dev/null | awk 'NR > 1 {print $6}' | sort -u)
+
+    if (( fixed_count == 0 )); then
+        ok "No world-writable directories without sticky bit were found on local filesystems."
+    else
+        ok "Sticky bit enforced on ${fixed_count} directories."
+    fi
+}
+
+ensure_grub_cmdline_linux_arg() {
+    local arg="$1"
+    local file="/etc/default/grub"
+    local tmp
+
+    [[ -f "$file" ]] || return 0
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN ensure GRUB_CMDLINE_LINUX contains ${arg}"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    awk -v arg="$arg" '
+        BEGIN { done = 0 }
+        {
+            if ($0 ~ /^[#[:space:]]*GRUB_CMDLINE_LINUX=/) {
+                done = 1
+                value = $0
+                sub(/^[^=]*="/, "", value)
+                sub(/".*$/, "", value)
+                count = split(value, parts, /[[:space:]]+/)
+                out = ""
+                found = 0
+                for (i = 1; i <= count; i++) {
+                    if (parts[i] == "") {
+                        continue
+                    }
+                    if (parts[i] == arg) {
+                        found = 1
+                    }
+                    out = out (out ? " " : "") parts[i]
+                }
+                if (!found) {
+                    out = out (out ? " " : "") arg
+                }
+                printf "GRUB_CMDLINE_LINUX=\"%s\"\n", out
+                next
+            }
+            print
+        }
+        END {
+            if (!done) {
+                printf "GRUB_CMDLINE_LINUX=\"%s\"\n", arg
+            }
+        }
+    ' "$file" > "$tmp"
+    backup_file "$file"
+    install -o root -g root -m 0644 "$tmp" "$file"
+    rm -f "$tmp"
+}
+
+configure_grub_audit_bootflag_post_attach() {
+    section "26" "GRUB audit boot flag"
+
+    if [[ ! -f /etc/default/grub ]] || ! cmd_exists update-grub; then
+        info "GRUB tooling is not available on this system. Skipping audit=1 boot flag."
+        return 0
+    fi
+
+    ensure_grub_cmdline_linux_arg "audit=1"
+    run_or_die "Update GRUB" update-grub
+    warn "Kernel boot parameter audit=1 configured. A reboot is required for this STIG control to take full effect."
+}
+
+configure_ssh_auth_policy_post_attach() {
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN remove strict SSH auth drop-in if present"
+    else
+        rm -f /etc/ssh/sshd_config.d/95-veeam-lockdown.conf
+    fi
+
+    if [[ "$DISABLE_SSHD_AFTER_ATTACH" == "yes" ]]; then
+        info "Global SSH authentication policy is irrelevant because SSHD will be disabled."
+        return 0
+    fi
+
+    if alternate_admin_key_login_exists; then
+        warn "An alternate sudo admin with authorized_keys was detected, but the script keeps global PasswordAuthentication unchanged to avoid accidental administrative lockout."
+        warn "If you want stricter STIG alignment, disable SSH password authentication only after validating a real key-based admin login path end-to-end."
+    else
+        warn "No alternate sudo admin with authorized_keys was detected. Global SSH password authentication is left unchanged to avoid locking out administrative access."
+    fi
+}
+
 # --------------------[ Post attach lockdown ]--------------------
 configure_veeam_certs_permissions() {
-    section "20" "Veeam certificates"
+    section "27" "Veeam certificates"
 
     if [[ ! -d /opt/veeam/transport/certs ]]; then
         warn "Directory /opt/veeam/transport/certs was not found. Skipping this step."
@@ -1818,22 +2910,28 @@ configure_veeam_certs_permissions() {
     ok "Veeam certificate permissions aligned with the documentation."
 }
 
-configure_veeam_reduced_sudo() {
-    section "21" "Reduce Veeam user privileges"
+remove_veeam_sudo_access() {
+    section "28" "Remove Veeam user sudo access"
 
-    write_file "/etc/sudoers.d/99-veeam-limited" "0440" "root" "root" <<EOF
-${VEEAM_USER} ALL = (root) NOPASSWD:NOEXEC: /usr/sbin/reboot, /usr/sbin/shutdown, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff
-EOF
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN remove /etc/sudoers.d/99-veeam-limited if present"
+    else
+        rm -f /etc/sudoers.d/99-veeam-limited
+    fi
 
-    run_or_die "Validate limited sudoers" visudo -c -f /etc/sudoers.d/99-veeam-limited
-    run_or_die "Remove ${VEEAM_USER} from sudo group" gpasswd -d "$VEEAM_USER" sudo
+    if id -nG "$VEEAM_USER" 2>/dev/null | tr ' ' '\n' | grep -Fxq 'sudo'; then
+        run_or_die "Remove ${VEEAM_USER} from sudo group" gpasswd -d "$VEEAM_USER" sudo
+    else
+        ok "${VEEAM_USER} is already not a member of the sudo group."
+    fi
 }
 
 lockdown_ssh_after_attach() {
-    section "22" "Lockdown SSH post-attach"
+    section "29" "Lockdown SSH post-attach"
 
     ensure_sshd_include_dropins
     install -d -m 0755 /etc/ssh/sshd_config.d
+    configure_ssh_auth_policy_post_attach
 
     if [[ "$DISABLE_SSH_FOR_USER_AFTER_ATTACH" == "yes" ]]; then
         write_file "/etc/ssh/sshd_config.d/99-veeamrepo-deny.conf" "0644" "root" "root" <<EOF
@@ -1843,11 +2941,21 @@ EOF
         run_or_die "Reload SSH service" systemctl reload ssh
         ok "SSH access blocked for ${VEEAM_USER}."
     else
+        if [[ "$DRY_RUN" == "yes" ]]; then
+            info "DRY-RUN remove deny rule for ${VEEAM_USER} if present"
+        else
+            rm -f /etc/ssh/sshd_config.d/99-veeamrepo-deny.conf
+        fi
+        run_or_die "Validate SSH configuration" sshd -t
+        run_or_die "Reload SSH service" systemctl reload ssh
         info "Per-user SSH lock is disabled by configuration."
     fi
 
     if [[ "$DISABLE_SSHD_AFTER_ATTACH" == "yes" ]]; then
         run_or_die "Disable SSH service" systemctl disable --now ssh
+    else
+        run_or_die "Enable SSH service" systemctl enable ssh
+        run_or_die "Start SSH service" systemctl start ssh
     fi
 }
 
@@ -1902,7 +3010,9 @@ EOF
     ui "     This avoids blocking traversal to ${REPO_DIR}."
     ui "  2. The repository directory ${REPO_DIR} is ${VEEAM_USER}:${VEEAM_GROUP} 700,"
     ui "     as recommended by Veeam for the backup path."
-    ui "  3. ${VEEAM_USER} remains in the sudo group during this phase,"
+    ui "  3. The allowed Veeam networks must include every backup server, proxy,"
+    ui "     gateway or mount server that needs direct access to the repository."
+    ui "  4. ${VEEAM_USER} remains in the sudo group during this phase,"
     ui "     so the initial onboarding with single-use credentials does not break."
 }
 
@@ -1914,14 +3024,27 @@ show_next_steps_prepare() {
    - single-use credentials
    - non-root user: ${VEEAM_USER}
    - home directory: /home/${VEEAM_USER}
+   - immutable repository retention configured in the hardened repository wizard
+   - network access from backup infrastructure components to the repository:
+     22 for SSH onboarding, 6160 for installer service, 6162 and 2500:3300 for transport
 
 2. If you want the Data Mover to remain persistent, temporarily keep root elevation available.
    This script intentionally leaves it available to avoid issues during the first attach.
 
-3. After the first successful attach, run:
+3. For backup jobs targeting this repository, use only forward incremental chains
+   with active full or synthetic full. Reverse incremental and forever forward
+   incremental are not supported with hardened repository immutability.
+
+4. Remember that .VBM metadata files remain mutable by design. The immutable data
+   is the backup chain content, not the live metadata file updated on every run.
+
+5. Before the post-attach lockdown, make sure you have a separate admin account
+   in the sudo group, or at minimum verified local-console root recovery.
+
+6. After the first successful attach, run:
    sudo $0 --phase post-attach-lockdown --veeam-user ${VEEAM_USER} --veeam-group ${VEEAM_GROUP}
 
-4. If a new password was generated, you can find it in:
+7. If a new password was generated, you can find it in:
    /root/.veeam_repo_credentials_${TIMESTAMP}
 EOF
 }
@@ -1931,8 +3054,13 @@ show_lockdown_summary() {
 
     cat <<EOF >&2
   Veeam user                : ${VEEAM_USER}
+  STIG-style PAM lockout    : enabled
+  Password history          : remember 5
+  AIDE                      : enabled
+  Auditd strict rules       : enabled
+  Sticky bit enforcement    : applied on local filesystems
   Full sudo                 : removed
-  Limited sudo              : active for reboot/shutdown
+  Limited sudo              : not granted
   Veeam cert dir            : /opt/veeam/transport/certs protected when present
   SSH for Veeam user        : ${DISABLE_SSH_FOR_USER_AFTER_ATTACH}
   Entire SSHD service       : ${DISABLE_SSHD_AFTER_ATTACH}
@@ -1968,7 +3096,7 @@ confirm_destruction_if_needed() {
     section "C1" "Destructive action confirmation"
     warn "This operation will initialize disk ${BACKUP_DISK}."
     local typed
-    read -r -p "To confirm, type exactly: WIPE ${BACKUP_DISK}: " typed
+    read -r -p "To confirm, type exactly: WIPE ${BACKUP_DISK}: " typed || die "Input stream closed while waiting for destructive action confirmation."
     [[ "$typed" == "WIPE ${BACKUP_DISK}" ]] || die "Invalid confirmation. Operation cancelled."
     ok "Destructive action confirmed."
 }
@@ -1976,7 +3104,8 @@ confirm_destruction_if_needed() {
 final_confirm() {
     [[ "$INTERACTIVE" == "yes" ]] || return 0
     local proceed
-    proceed="$(ask_yes_no_default "Do you want to continue?" "no")"
+    ask_yes_no_default "Do you want to continue?" "no"
+    proceed="$PROMPT_RESULT"
     [[ "$proceed" == "yes" ]] || die "Operation cancelled by the user."
 }
 
@@ -2006,6 +3135,9 @@ prepare_flow() {
     mount_repo
     create_veeam_user_prepare
     configure_auto_updates
+    configure_account_policy_prepare
+    configure_password_quality_prepare
+    configure_time_sync_prepare
     configure_banners
     configure_kernel_sysctl
     configure_ssh_prepare
@@ -2031,8 +3163,15 @@ post_attach_lockdown_flow() {
     fi
 
     final_confirm
+    install_lockdown_packages
+    configure_account_policy_post_attach
+    configure_pam_post_attach
+    configure_auditd_post_attach
+    configure_aide_post_attach
+    enforce_sticky_bit_post_attach
+    configure_grub_audit_bootflag_post_attach
     configure_veeam_certs_permissions
-    configure_veeam_reduced_sudo
+    remove_veeam_sudo_access
     lockdown_ssh_after_attach
     show_lockdown_summary
 }
@@ -2040,7 +3179,9 @@ post_attach_lockdown_flow() {
 main() {
     parse_args "$@"
     require_root
+    ensure_timezone_europe_rome
     init_logging
+    maybe_load_prepare_state
     validate_common_inputs
     load_os_release
     ensure_safe_workdir
