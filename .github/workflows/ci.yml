@@ -21,6 +21,7 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: '.'
+          severity: error
 
       - name: Help smoke test
         run: |
