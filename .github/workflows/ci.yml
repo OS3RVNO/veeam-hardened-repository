@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          bash -n veeam_hardened_repository_safe.sh
+          bash -n tests/veeam_test_runner.sh
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+
+      - name: Help smoke test
+        run: |
+          bash veeam_hardened_repository_safe.sh --help
+          bash veeam_hardened_repository_safe.sh --help-full
+
+  integration:
+    runs-on: ubuntu-24.04
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lvm2 xfsprogs parted util-linux
+
+      - name: Run integration tests
+        run: sudo bash tests/veeam_test_runner.sh

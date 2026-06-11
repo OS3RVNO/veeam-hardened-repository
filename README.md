@@ -118,6 +118,7 @@ The script does not:
 ## Repository Structure
 
 - [veeam_hardened_repository_safe.sh](./veeam_hardened_repository_safe.sh)
+- [tests/veeam_test_runner.sh](./tests/veeam_test_runner.sh)
 - [docs/OPERATIONAL_GUIDE.md](./docs/OPERATIONAL_GUIDE.md)
 - [docs/FAQ.md](./docs/FAQ.md)
 - [CHANGELOG.md](./CHANGELOG.md)
@@ -126,6 +127,7 @@ The script does not:
 - [SUPPORT.md](./SUPPORT.md)
 - [SECURITY.md](./SECURITY.md)
 - [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- [LICENSE](./LICENSE)
 
 ## Quick Start
 
@@ -252,7 +254,7 @@ Common operator questions are documented here:
 
 The project is ready for operational use and further iteration.
 
-If you plan to distribute or reuse it widely, add an explicit `LICENSE` file.
+This project is licensed under the [MIT License](./LICENSE).
 
 ## GitHub Publishing
 

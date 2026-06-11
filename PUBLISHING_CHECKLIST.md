@@ -9,11 +9,7 @@
 
 ## 2. License Decision
 
-- [ ] choose a license before public publication
-
-Note:
-
-If you publish without a license, the code is effectively `all rights reserved`.
+- [x] MIT License added (see [LICENSE](./LICENSE))
 
 ## 3. Minimum Technical Checks
 
@@ -34,7 +30,7 @@ git init
 git add .
 git commit -m "Initial release"
 git branch -M main
-git remote add origin https://github.com/<user>/<repo>.git
+git remote add origin https://github.com/OS3RVNO/veeam-hardened-repository.git
 git push -u origin main
 ```
 

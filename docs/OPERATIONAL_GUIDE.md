@@ -598,6 +598,61 @@ These are the most important values:
 
 If you cannot confidently choose one of these values, stop and verify with the commands in this guide.
 
+## Advanced and Hardening Tuning Parameters
+
+These parameters have safe defaults and are usually left unchanged. They are
+listed here so an operator can understand what each one affects before
+overriding it. Run `--help` to see the full list with accepted values.
+
+### Storage layout (`prepare`)
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--use-partition yes\|no` | `yes` | Create a GPT partition on the disk before using it as an LVM physical volume. Use `no` to consume the whole disk as a PV directly. |
+| `--vg NAME` | `vg_veeam` | Name of the LVM volume group created on the repository disk. |
+| `--lv NAME` | `lv_repo` | Name of the LVM logical volume that backs the repository filesystem. |
+| `--lv-size SIZE\|100%FREE` | `100%FREE` | Size passed to `lvcreate` for the repository logical volume. |
+
+### Network and firewall (`prepare`)
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--extra-ufw-rules "rule1;rule2"` | empty | Additional `ufw` rules applied as-is, separated by `;` (e.g. `"allow from 10.0.0.5 to any port 9392 proto tcp"`). |
+| `--disable-ipv6 yes\|no` | `no` | Disable IPv6 at the kernel level via sysctl. |
+| `--enable-ufw yes\|no` | `yes` | Enable and configure UFW. With `no`, firewall configuration is skipped entirely (not recommended). |
+
+### SSH and authentication (`prepare`)
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--password-auth yes\|no` | `yes` | Allow SSH password authentication. Set to `no` only after key-based admin access is verified to work. |
+| `--reset-existing-veeam-password yes\|no` | `no` | If the `veeamrepo` user already exists with a locked/missing password, generate and set a new one. |
+
+### Updates and kernel hardening (`prepare`)
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--auto-security-updates yes\|no` | `yes` | Enable `unattended-upgrades` for security updates. |
+| `--auto-reboot-updates yes\|no` | `no` | Allow `unattended-upgrades` to reboot automatically when required. |
+| `--harden-userns yes\|no` | `yes` | Restrict unprivileged user namespaces via sysctl. |
+
+### Boot and root account (`prepare`)
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--grub-password yes\|no` | `no` | Set a GRUB superuser password (PBKDF2 hash collected interactively or via `--non-interactive` prerequisites). Requires `update-grub`. |
+| `--lock-root yes\|no` | `yes` | Lock the root account password (`passwd -l root`). |
+
+### Post-attach lockdown (`--phase post-attach-lockdown`)
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--disable-ssh-for-user-after-attach yes\|no` | `yes` | Add a `DenyUsers` rule for `--veeam-user` in `sshd_config.d`, blocking interactive SSH for that account after onboarding. |
+| `--disable-sshd-after-attach yes\|no` | `no` | Disable and stop the SSH service entirely. Only use this if you have another access path to the server (e.g. console access, IPMI). |
+
+If you are unsure about any of these, keep the defaults: they reflect the
+safer, recommended baseline for a Veeam Hardened Repository.
+
 ## Practical Rule for Multiple Networks
 
 If you need multiple allowed networks:
