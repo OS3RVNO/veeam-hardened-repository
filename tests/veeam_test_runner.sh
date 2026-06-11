@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 SCRIPT="${SCRIPT_DIR}/../veeam_hardened_repository_safe.sh"
 NOMAIN=/tmp/veeam_no_main.sh
 head -n -1 "$SCRIPT" > "$NOMAIN"
+# shellcheck source=/dev/null
 source "$NOMAIN"
 trap - ERR
 
@@ -26,15 +27,20 @@ img1=/tmp/veeam_test1.img
 truncate -s 512M "$img1"
 loop1=$(losetup -f --show "$img1")
 BACKUP_DISK="$loop1"
+# shellcheck disable=SC2034 # consumed as globals by functions sourced from NOMAIN
 USE_PARTITION=yes
 VG_NAME=vg_vtest1
 LV_NAME=lv_repo
+# shellcheck disable=SC2034
 LV_SIZE=100%FREE
 MOUNT_POINT=/mnt/veeamtest1
 REPO_DIR=/mnt/veeamtest1/backup
 FSTAB_OPTS=defaults,noatime
+# shellcheck disable=SC2034
 FORCE_WIPE=no
+# shellcheck disable=SC2034
 DRY_RUN=no
+# shellcheck disable=SC2034
 INTERACTIVE=no
 mkdir -p "$MOUNT_POINT" "$REPO_DIR"
 init_logging
