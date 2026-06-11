@@ -65,6 +65,9 @@ if mountpoint_in_use "$REPO_DIR" && ! mountpoint_in_use "$MOUNT_POINT"; then
   RESULTS+=(TEST1_OK)
 else
   RESULTS+=(TEST1_FAIL)
+  cat /tmp/veeam_test1_create_lvm.out /tmp/veeam_test1_create_lvm.err \
+      /tmp/veeam_test1_create_xfs.out /tmp/veeam_test1_create_xfs.err \
+      /tmp/veeam_test1_mount.out /tmp/veeam_test1_mount.err >&2 || true
 fi
 echo "${RESULTS[-1]}"
 cp -a "$fstab_bak1" /etc/fstab
@@ -89,6 +92,7 @@ if [[ $rc2 -ne 0 ]]; then
   RESULTS+=(TEST2_OK)
 else
   RESULTS+=(TEST2_FAIL)
+  cat /tmp/veeam_test2.out /tmp/veeam_test2.err >&2 || true
 fi
 echo "${RESULTS[-1]}"
 losetup -d "$loop2" >/dev/null 2>&1 || true
@@ -114,6 +118,7 @@ if [[ $rc4 -eq 0 ]]; then
   RESULTS+=(TEST4_OK)
 else
   RESULTS+=(TEST4_FAIL)
+  cat /tmp/veeam_test4.out /tmp/veeam_test4.err >&2 || true
 fi
 echo "${RESULTS[-1]}"
 userdel -r veeamrepotest >/dev/null 2>&1 || true
