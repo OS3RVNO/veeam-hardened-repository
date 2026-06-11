@@ -11,6 +11,8 @@ head -n -1 "$SCRIPT" > "$NOMAIN"
 source "$NOMAIN"
 trap - ERR
 
+RESULTS=()
+
 cleanup_loop() {
     local vg_name="$1"
     local mount_target="$2"
@@ -60,10 +62,11 @@ uuid1=$(blkid -s UUID -o value "/dev/${VG_NAME}/${LV_NAME}")
 printf 'UUID=%s %s xfs %s 0 0\n' "$uuid1" "$REPO_DIR" "$FSTAB_OPTS" >> /etc/fstab
 mount_repo >/tmp/veeam_test1_mount.out 2>/tmp/veeam_test1_mount.err
 if mountpoint_in_use "$REPO_DIR" && ! mountpoint_in_use "$MOUNT_POINT"; then
-  echo TEST1_OK
+  RESULTS+=(TEST1_OK)
 else
-  echo TEST1_FAIL
+  RESULTS+=(TEST1_FAIL)
 fi
+echo "${RESULTS[-1]}"
 cp -a "$fstab_bak1" /etc/fstab
 cleanup_loop "$VG_NAME" "$REPO_DIR" "$loop1"
 rm -f "$fstab_bak1" "$img1"
@@ -83,10 +86,11 @@ set +e
 rc2=$?
 set -e
 if [[ $rc2 -ne 0 ]]; then
-  echo TEST2_OK
+  RESULTS+=(TEST2_OK)
 else
-  echo TEST2_FAIL
+  RESULTS+=(TEST2_FAIL)
 fi
+echo "${RESULTS[-1]}"
 losetup -d "$loop2" >/dev/null 2>&1 || true
 rm -f "$img2"
 
@@ -94,9 +98,30 @@ rm -f "$img2"
 find_repo_lv_path() { printf '%s\n' '/dev/vg_fake/lv_repo'; }
 vg_is_fully_on_target_disk() { return 1; }
 if find_target_repo_lv_path >/dev/null 2>&1; then
-  echo TEST3_FAIL
+  RESULTS+=(TEST3_FAIL)
 else
-  echo TEST3_OK
+  RESULTS+=(TEST3_OK)
 fi
+echo "${RESULTS[-1]}"
+
+# Test 4: post-attach-lockdown dry-run must complete without modifying the system.
+useradd -m -U veeamrepotest >/dev/null 2>&1
+set +e
+"$SCRIPT" --phase post-attach-lockdown --non-interactive --dry-run --veeam-user veeamrepotest --veeam-group veeamrepotest >/tmp/veeam_test4.out 2>/tmp/veeam_test4.err
+rc4=$?
+set -e
+if [[ $rc4 -eq 0 ]]; then
+  RESULTS+=(TEST4_OK)
+else
+  RESULTS+=(TEST4_FAIL)
+fi
+echo "${RESULTS[-1]}"
+userdel -r veeamrepotest >/dev/null 2>&1 || true
 
 rm -f "$NOMAIN"
+
+for result in "${RESULTS[@]}"; do
+  case "$result" in
+    *_FAIL) echo "One or more tests failed." >&2; exit 1 ;;
+  esac
+done
