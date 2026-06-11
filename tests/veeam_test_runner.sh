@@ -85,7 +85,7 @@ udevadm settle
 part2="${loop2}p1"
 mkfs.ext4 -F "$part2" >/dev/null 2>&1
 set +e
-"$SCRIPT" --phase prepare --non-interactive --precheck-only --disk "$loop2" --mount /mnt/veeamtest2 --repo-dir /mnt/veeamtest2/backup --veeam-user veeamrepo --veeam-group veeamrepo --ssh-net 192.168.10.0/24 --veeam-net 192.168.10.0/24 >/tmp/veeam_test2.out 2>/tmp/veeam_test2.err
+bash "$SCRIPT" --phase prepare --non-interactive --precheck-only --disk "$loop2" --mount /mnt/veeamtest2 --repo-dir /mnt/veeamtest2/backup --veeam-user veeamrepo --veeam-group veeamrepo --ssh-net 192.168.10.0/24 --veeam-net 192.168.10.0/24 >/tmp/veeam_test2.out 2>/tmp/veeam_test2.err
 rc2=$?
 set -e
 if [[ $rc2 -ne 0 ]]; then
@@ -111,7 +111,7 @@ echo "${RESULTS[-1]}"
 # Test 4: post-attach-lockdown dry-run must complete without modifying the system.
 useradd -m -U veeamrepotest >/dev/null 2>&1
 set +e
-"$SCRIPT" --phase post-attach-lockdown --non-interactive --dry-run --veeam-user veeamrepotest --veeam-group veeamrepotest >/tmp/veeam_test4.out 2>/tmp/veeam_test4.err
+bash "$SCRIPT" --phase post-attach-lockdown --non-interactive --dry-run --veeam-user veeamrepotest --veeam-group veeamrepotest >/tmp/veeam_test4.out 2>/tmp/veeam_test4.err
 rc4=$?
 set -e
 if [[ $rc4 -eq 0 ]]; then
