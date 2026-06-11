@@ -2,10 +2,10 @@
 
 ## 1. Content Review
 
-- [ ] review `README.md`
-- [ ] review `docs/OPERATIONAL_GUIDE.md`
-- [ ] verify that the script is the intended version
-- [ ] remove any unnecessary local files
+- [x] review `README.md`
+- [x] review `docs/OPERATIONAL_GUIDE.md`
+- [x] verify that the script is the intended version
+- [x] remove any unnecessary local files
 
 ## 2. License Decision
 
