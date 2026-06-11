@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-SCRIPT_VERSION="2026.03.23"
+SCRIPT_VERSION="2026.06.11"
 FORCED_TIMEZONE="Europe/Rome"
 export TZ="$FORCED_TIMEZONE"
 
@@ -285,6 +285,16 @@ validate_mount_path() {
 
 validate_lv_size() {
     [[ "$1" =~ ^[0-9]+([KkMmGgTtPpEe])$ ]] || [[ "$1" =~ ^[0-9]+%([A-Za-z]+)$ ]]
+}
+
+validate_lvm_name() {
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9+._-]{0,126}$ ]] || return 1
+    case "$1" in
+        .|..|*_tmeta|*_tdata|*_cdata|*_cmeta|snapshot|pvmove*)
+            return 1
+            ;;
+    esac
+    return 0
 }
 
 validate_ipv4_octet() {
@@ -1347,6 +1357,9 @@ validate_prepare_inputs() {
     validate_mount_path "$MOUNT_POINT" || die "Invalid mount point: ${MOUNT_POINT}"
     validate_mount_path "$REPO_DIR" || die "Invalid repository directory: ${REPO_DIR}"
     validate_lv_size "$LV_SIZE" || die "Invalid LV_SIZE: ${LV_SIZE}"
+    validate_lvm_name "$VG_NAME" || die "Invalid LVM volume group name: ${VG_NAME}"
+    validate_lvm_name "$LV_NAME" || die "Invalid LVM logical volume name: ${LV_NAME}"
+    [[ "$VG_NAME" != "$LV_NAME" ]] || die "--vg and --lv must be different names."
     [[ "$MOUNT_POINT" != "/" ]] || die "Refusing to use / as repository mount point."
     [[ "$REPO_DIR" != "$MOUNT_POINT" ]] || die "REPO_DIR must be a dedicated subdirectory under MOUNT_POINT, not the mount point itself."
     path_is_under_mountpoint "$REPO_DIR" "$MOUNT_POINT" || die "REPO_DIR must be under MOUNT_POINT."
@@ -2383,7 +2396,7 @@ EOF
         return 0
     fi
 
-    grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf[[:space:]]*$' /etc/ssh/sshd_config && return 0
+    grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' /etc/ssh/sshd_config && return 0
 
     if [[ "$DRY_RUN" == "yes" ]]; then
         info "DRY-RUN prepend SSH include to /etc/ssh/sshd_config"
@@ -2426,7 +2439,6 @@ MaxSessions 4
 AllowAgentForwarding no
 AllowTcpForwarding no
 X11Forwarding no
-X11UseLocalhost yes
 PermitUserEnvironment no
 ClientAliveInterval 300
 ClientAliveCountMax 2

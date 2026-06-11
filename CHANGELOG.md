@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.06.11
+
+- validate `--vg` and `--lv` against LVM naming rules before storage
+  operations start, and reject identical VG/LV names
+- removed a dead `X11UseLocalhost yes` line from the SSH hardening
+  drop-in (meaningless when `X11Forwarding no` is set)
+- made the `sshd_config` `Include /etc/ssh/sshd_config.d/*.conf` detection
+  tolerant of trailing comments/whitespace, avoiding a duplicate `Include`
+  line on rerun against a customized `sshd_config`
+
 ## 2026.03.23
 
 The script now uses date-based versioning (`SCRIPT_VERSION`), matching this
