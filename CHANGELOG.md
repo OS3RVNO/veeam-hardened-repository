@@ -9,6 +9,8 @@
 - made the `sshd_config` `Include /etc/ssh/sshd_config.d/*.conf` detection
   tolerant of trailing comments/whitespace, avoiding a duplicate `Include`
   line on rerun against a customized `sshd_config`
+- `ensure_timezone_europe_rome` now honors `--dry-run` instead of always
+  changing the system timezone, so a dry run no longer has side effects
 
 ## 2026.03.23
 

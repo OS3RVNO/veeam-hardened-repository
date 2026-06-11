@@ -749,11 +749,21 @@ ensure_timezone_europe_rome() {
             return 0
         fi
 
+        if [[ "$DRY_RUN" == "yes" ]]; then
+            info "DRY-RUN set timezone to ${FORCED_TIMEZONE} (currently ${current_timezone:-unknown})"
+            return 0
+        fi
+
         if timedatectl set-timezone "$FORCED_TIMEZONE" >/dev/null 2>&1; then
             return 0
         fi
 
         warn "timedatectl could not set timezone to ${FORCED_TIMEZONE}. Falling back to /etc/localtime."
+    fi
+
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN set timezone to ${FORCED_TIMEZONE} via /etc/localtime"
+        return 0
     fi
 
     ln -snf "$zoneinfo" /etc/localtime
