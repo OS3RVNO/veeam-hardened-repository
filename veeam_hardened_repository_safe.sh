@@ -2791,6 +2791,11 @@ EOF
 enforce_sticky_bit_post_attach() {
     section "25" "Sticky bit on public directories"
 
+    if [[ "$DRY_RUN" == "yes" ]]; then
+        info "DRY-RUN scan local filesystems for world-writable directories without a sticky bit"
+        return 0
+    fi
+
     local fs_path dir fixed_count=0
 
     while read -r fs_path; do

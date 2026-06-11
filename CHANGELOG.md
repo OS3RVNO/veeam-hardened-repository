@@ -11,6 +11,9 @@
   line on rerun against a customized `sshd_config`
 - `ensure_timezone_europe_rome` now honors `--dry-run` instead of always
   changing the system timezone, so a dry run no longer has side effects
+- `enforce_sticky_bit_post_attach` now skips its filesystem scan under
+  `--dry-run` instead of walking every local mount, which could take a
+  very long time on hosts with large filesystems
 
 ## 2026.03.23
 
