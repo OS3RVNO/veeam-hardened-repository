@@ -1,94 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
-  <title id="title">Veeam Hardened Repository Bootstrap</title>
-  <desc id="desc">Cleaner banner for the Veeam Hardened Repository Bootstrap project.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#10212b"/>
-      <stop offset="52%" stop-color="#173846"/>
-      <stop offset="100%" stop-color="#204b58"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#f4a261"/>
-      <stop offset="100%" stop-color="#e76f51"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#08131a" flood-opacity="0.28"/>
-    </filter>
-  </defs>
+  <title id="title">hard-repo</title>
+  <desc id="desc">Production-oriented Veeam hardened repository bootstrap for Ubuntu.</desc>
 
-  <rect width="1280" height="640" fill="url(#bg)"/>
-  <circle cx="1090" cy="126" r="168" fill="#2a9d8f" opacity="0.10"/>
-  <circle cx="1040" cy="516" r="194" fill="#f4a261" opacity="0.06"/>
-  <circle cx="116" cy="108" r="108" fill="#e9c46a" opacity="0.06"/>
+  <rect width="1280" height="640" fill="#10181d"/>
+  <rect x="0" y="0" width="18" height="640" fill="#18a999"/>
+  <rect x="18" y="0" width="6" height="640" fill="#f2b84b"/>
 
-  <g transform="translate(76 82)">
-    <rect x="0" y="0" width="430" height="56" rx="28" fill="#ffffff" opacity="0.08"/>
-    <text x="24" y="36" fill="#f5fbfd" font-size="27" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
-      Veeam Hardened Repository Bootstrap
-    </text>
+  <g transform="translate(82 76)" font-family="Segoe UI, Arial, sans-serif">
+    <text x="0" y="44" fill="#18a999" font-size="26" font-weight="700" letter-spacing="0">VEEAM HARDENED REPOSITORY</text>
+    <text x="0" y="142" fill="#ffffff" font-size="88" font-weight="800" letter-spacing="0">hard-repo</text>
+    <rect x="0" y="174" width="610" height="5" fill="#f2b84b"/>
+    <text x="0" y="238" fill="#d9e4e8" font-size="31" letter-spacing="0">Safer bootstrap and controlled lockdown</text>
+    <text x="0" y="282" fill="#96aab3" font-size="25" letter-spacing="0">Ubuntu 22.04 LTS / 24.04 LTS</text>
 
-    <text x="0" y="134" fill="#ffffff" font-size="58" font-family="Segoe UI, Arial, sans-serif" font-weight="820">
-      Safer first attach
-    </text>
-    <text x="0" y="202" fill="#ffffff" font-size="58" font-family="Segoe UI, Arial, sans-serif" font-weight="820">
-      for Ubuntu repositories
-    </text>
+    <g transform="translate(0 350)">
+      <rect x="0" y="0" width="190" height="74" rx="6" fill="#18262d" stroke="#38505b"/>
+      <text x="22" y="31" fill="#18a999" font-size="18" font-weight="700" letter-spacing="0">01 PRECHECK</text>
+      <text x="22" y="57" fill="#d9e4e8" font-size="19" letter-spacing="0">Fail closed</text>
 
-    <rect x="0" y="240" width="440" height="6" rx="3" fill="url(#accent)"/>
+      <rect x="210" y="0" width="190" height="74" rx="6" fill="#18262d" stroke="#38505b"/>
+      <text x="232" y="31" fill="#18a999" font-size="18" font-weight="700" letter-spacing="0">02 PREPARE</text>
+      <text x="232" y="57" fill="#d9e4e8" font-size="19" letter-spacing="0">LVM + XFS</text>
 
-    <text x="0" y="304" fill="#dbe7ec" font-size="28" font-family="Segoe UI, Arial, sans-serif">
-      Bash automation for Veeam onboarding, hardening, and controlled lockdown
-    </text>
-
-    <g transform="translate(0 360)">
-      <rect x="0" y="0" width="206" height="52" rx="26" fill="#ffffff" opacity="0.10"/>
-      <text x="24" y="33" fill="#f5fbfd" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
-        Ubuntu 22.04 / 24.04
-      </text>
-
-      <rect x="224" y="0" width="138" height="52" rx="26" fill="#ffffff" opacity="0.10"/>
-      <text x="256" y="33" fill="#f5fbfd" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
-        LVM + XFS
-      </text>
-
-      <rect x="380" y="0" width="138" height="52" rx="26" fill="#ffffff" opacity="0.10"/>
-      <text x="410" y="33" fill="#f5fbfd" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
-        SSH + UFW
-      </text>
+      <rect x="420" y="0" width="230" height="74" rx="6" fill="#18262d" stroke="#38505b"/>
+      <text x="442" y="31" fill="#f2b84b" font-size="18" font-weight="700" letter-spacing="0">03 LOCKDOWN</text>
+      <text x="442" y="57" fill="#d9e4e8" font-size="19" letter-spacing="0">After first attach</text>
     </g>
 
-    <text x="0" y="468" fill="#f1c27d" font-size="24" font-family="Segoe UI, Arial, sans-serif" font-weight="700">
-      Prepare first. Lock down after a successful Veeam attach.
-    </text>
+    <text x="0" y="505" fill="#758b95" font-size="20" letter-spacing="0">Dry-run  /  explicit disk selection  /  additive audit rules  /  operator logs</text>
   </g>
 
-  <g transform="translate(846 118)" filter="url(#shadow)">
-    <rect x="0" y="0" width="356" height="354" rx="28" fill="#f7fbfc"/>
-    <rect x="0" y="0" width="356" height="72" rx="28" fill="#1f6f78"/>
-    <rect x="0" y="40" width="356" height="32" fill="#1f6f78"/>
-    <circle cx="30" cy="36" r="7" fill="#f4a261"/>
-    <circle cx="54" cy="36" r="7" fill="#e76f51"/>
-    <circle cx="78" cy="36" r="7" fill="#2a9d8f"/>
-
-    <g transform="translate(28 102)">
-      <rect x="0" y="0" width="300" height="74" rx="20" fill="#edf6f4"/>
-      <text x="20" y="44" fill="#10323d" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="800">
-        Phase 1  Prepare
-      </text>
-      <text x="20" y="105" fill="#4b6670" font-size="21" font-family="Segoe UI, Arial, sans-serif">
-        Disk checks, LVM, XFS, SSH, UFW
-      </text>
-
-      <path d="M150 124 L150 166" stroke="#2a9d8f" stroke-width="6" stroke-linecap="round"/>
-      <path d="M132 152 L150 174 L168 152" fill="none" stroke="#2a9d8f" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-
-      <rect x="0" y="194" width="300" height="94" rx="20" fill="#fff3e8"/>
-      <text x="20" y="238" fill="#10323d" font-size="28" font-family="Segoe UI, Arial, sans-serif" font-weight="800">
-        Phase 2  Lockdown
-      </text>
-      <text x="20" y="275" fill="#4b6670" font-size="21" font-family="Segoe UI, Arial, sans-serif">
-        Reduce sudo after successful attach
-      </text>
-    </g>
+  <g transform="translate(850 92)" font-family="Consolas, Cascadia Mono, monospace">
+    <rect x="0" y="0" width="352" height="452" rx="8" fill="#0a1014" stroke="#38505b" stroke-width="2"/>
+    <rect x="0" y="0" width="352" height="48" rx="8" fill="#18262d"/>
+    <rect x="0" y="40" width="352" height="8" fill="#18262d"/>
+    <circle cx="28" cy="24" r="6" fill="#ef6b5b"/>
+    <circle cx="50" cy="24" r="6" fill="#f2b84b"/>
+    <circle cx="72" cy="24" r="6" fill="#18a999"/>
+    <text x="24" y="92" fill="#758b95" font-size="18" letter-spacing="0">$ sudo ./hard-repo</text>
+    <text x="24" y="134" fill="#18a999" font-size="18" font-weight="700" letter-spacing="0">[PRECHECK]</text>
+    <text x="24" y="166" fill="#d9e4e8" font-size="17" letter-spacing="0">disk: /dev/sdb</text>
+    <text x="24" y="194" fill="#d9e4e8" font-size="17" letter-spacing="0">root disk: /dev/sda</text>
+    <text x="24" y="222" fill="#d9e4e8" font-size="17" letter-spacing="0">target: /veeamrepo</text>
+    <text x="24" y="270" fill="#18a999" font-size="18" font-weight="700" letter-spacing="0">[STORAGE]</text>
+    <text x="24" y="302" fill="#d9e4e8" font-size="17" letter-spacing="0">LVM + XFS ready</text>
+    <text x="24" y="350" fill="#f2b84b" font-size="18" font-weight="700" letter-spacing="0">[NEXT]</text>
+    <text x="24" y="382" fill="#d9e4e8" font-size="17" letter-spacing="0">Attach from Veeam,</text>
+    <text x="24" y="410" fill="#d9e4e8" font-size="17" letter-spacing="0">then apply lockdown.</text>
   </g>
 </svg>

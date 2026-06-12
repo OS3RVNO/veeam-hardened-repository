@@ -28,6 +28,11 @@ During the first connection, `veeamrepo` must still be able to elevate privilege
 4. add the repository in Veeam
 5. run a backup test
 6. `post-attach-lockdown`
+7. run a restore test after lockdown
+8. remove the generated credential file after acceptance
+
+For the complete production gate, use
+[PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md).
 
 ## Useful Commands Before You Start
 
@@ -585,6 +590,9 @@ If there is only one candidate disk, the script may suggest it automatically.
 
 If there are multiple candidate disks, interactive mode will display them.
 
+Non-interactive mode always requires an explicit `--disk`. Automatic disk
+selection is intentionally disabled for unattended runs.
+
 ## Parameters the Operator Must Usually Decide
 
 These are the most important values:
@@ -625,8 +633,16 @@ overriding it. Run `--help` to see the full list with accepted values.
 
 | Parameter | Default | Effect |
 | --- | --- | --- |
-| `--password-auth yes\|no` | `yes` | Allow SSH password authentication. Set to `no` only after key-based admin access is verified to work. |
+| `--password-auth yes\|no` | `yes` | Allow SSH password authentication. With `no`, the Veeam user must already exist with a non-empty `authorized_keys` file. |
 | `--reset-existing-veeam-password yes\|no` | `no` | If the `veeamrepo` user already exists with a locked/missing password, generate and set a new one. |
+| `--show-generated-password yes\|no` | `no` | Print a newly generated password to the terminal. Leave disabled when output may be captured by orchestration or support logs; read the root-only credential file locally instead. |
+
+### Audit and PAM hardening
+
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `--enable-auditd yes\|no` | `yes` | Install and configure additive audit rules. Existing site rules are preserved. |
+| `--enable-pam-hardening yes\|no` | `no` | Opt in to changes in `common-auth`, `common-password`, `faillock.conf`, and password-quality policy. Enable only after console recovery and a site-specific authentication test are available. |
 
 ### Updates and kernel hardening (`prepare`)
 
@@ -652,6 +668,11 @@ overriding it. Run `--help` to see the full list with accepted values.
 
 If you are unsure about any of these, keep the defaults: they reflect the
 safer, recommended baseline for a Veeam Hardened Repository.
+
+Automatic PAM changes are intentionally disabled by default because PAM
+stacks can include organization-specific modules. This does not prevent Veeam
+repository hardening; apply the organization's approved PAM policy separately,
+or enable the option first on a staging clone.
 
 ## Practical Rule for Multiple Networks
 

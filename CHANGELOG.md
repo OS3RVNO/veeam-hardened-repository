@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026.06.12
+
+- rename the terminal and repository presentation to `hard-repo`
+- refresh the GitHub README banner, status badges, safety summary, and
+  production gate
+- make the full Docker flow clean up containers, test LVM state, and
+  `scsi_debug` disks by default
+- make successful repository path validation return zero explicitly under
+  `set -e`
+- keep `--dry-run` from aborting when the simulated logical volume has no
+  UUID yet
+- make the integration runner unload `scsi_debug` after unexpected exits
+- reject repository paths containing `.` or `..` components, repeated
+  separators, or paths outside the selected mount point
+- resolve the root filesystem through its full `lsblk` parent chain so LVM
+  and device-mapper roots are mapped back to their physical disks
+- refuse `--force-wipe yes` when the running system disk cannot be determined
+- stop when a non-mounted repository path would hide existing data
+- make destructive cleanup fail closed when PV, signature, GPT, or partition
+  table cleanup fails
+- keep `--precheck-only` from changing the system timezone
+- stop printing generated credentials by default; use
+  `--show-generated-password yes` only for an attended run
+- make automatic PAM file changes opt-in with
+  `--enable-pam-hardening yes`
+- remove the audit rules global `-D` directive so existing site audit rules
+  are preserved
+- add non-destructive security regression tests to CI
+
 ## 2026.06.11
 
 - validate `--vg` and `--lv` against LVM naming rules before storage

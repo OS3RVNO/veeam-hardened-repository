@@ -17,9 +17,20 @@ Run:
 
 ```bash
 bash -n veeam_hardened_repository_safe.sh
+bash -n tests/security_regression_tests.sh
+bash -n tests/veeam_test_runner.sh
+shellcheck --severity=style \
+  veeam_hardened_repository_safe.sh \
+  tests/security_regression_tests.sh \
+  tests/veeam_test_runner.sh \
+  tests/full_flow_in_docker.sh
+bash tests/security_regression_tests.sh
 bash veeam_hardened_repository_safe.sh --help
 bash veeam_hardened_repository_safe.sh --help-full
 ```
+
+Run the root/LVM integration suite on Ubuntu 22.04 and 24.04 through CI before
+tagging a release.
 
 ## 4. Create the GitHub Repository
 
